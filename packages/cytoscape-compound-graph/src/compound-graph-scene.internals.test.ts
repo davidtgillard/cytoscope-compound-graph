@@ -525,6 +525,79 @@ describe("CompoundGraphScene internals", () => {
     expect(() => scene.ensureModelFromCy(cy)).toThrow("layout model not initialized");
   });
 
+  it("setClampParentToViewport and setViewportPaddingPx update scene settings", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+      ],
+      edges: [],
+    });
+    scene.setClampParentToViewport(true);
+    scene.setViewportPaddingPx(12);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    expect(scene.getModel()).not.toBeNull();
+  });
+
+  it("renderedHandleBox returns bounds for a selected container with a model", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    cy.getElementById("parent").select();
+    const box = scene.renderedHandleBox(cy, "parent");
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
+  });
+
+  it("unjamLoadedLayout separates jammed nodes and syncs cytoscape when changed", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 400, compoundHeight: 400 },
+        { id: "a", label: "a", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+        { id: "b", label: "b", color: "#a8b4c4", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    const { changed } = scene.unjamLoadedLayout(cy, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(cy.getElementById("a").position("x")).not.toBeCloseTo(cy.getElementById("b").position("x"), 0);
+  });
+
+  it("unjamLoadedLayout reports unchanged for a free layout", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 400, compoundHeight: 400 },
+        { id: "a", label: "a", color: "#94a3b8", kind: "leaf", parent: "parent", x: -80, y: 0 },
+        { id: "b", label: "b", color: "#a8b4c4", kind: "leaf", parent: "parent", x: 80, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    expect(scene.unjamLoadedLayout(cy)).toEqual({ changed: false });
+  });
+
+  it("unjamLoadedLayout throws when the layout model is missing", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    internal.model = null;
+    expect(() => scene.unjamLoadedLayout(cy)).toThrow("layout model not initialized");
+  });
+
   it("renderedHandleBox returns null when the model was cleared", () => {
     const scene = CompoundGraphScene.fromSpec({
       nodes: [

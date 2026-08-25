@@ -84,6 +84,15 @@ export {
 export { layoutModelFromCy, applyLayoutModelToCy } from "./cytoscape-sync";
 
 export {
+  isFullyImpeded,
+  isLocallyFree,
+  isValidRest,
+  unjamLayoutModel,
+  type UnjamLayoutOptions,
+  type UnjamLayoutResult,
+} from "./layout-unjam";
+
+export {
   type CompoundGraphTheme,
   type LeafDomVisualStyle,
   DEFAULT_COMPOUND_GRAPH_THEME,

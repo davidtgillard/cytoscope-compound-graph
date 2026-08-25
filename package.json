@@ -15,5 +15,9 @@
     "test:coverage": "npm run test:coverage -w @dgillard/cytoscape-compound-graph",
     "docs": "npm run docs -w @dgillard/cytoscape-compound-graph",
     "attw": "npm run build -w @dgillard/cytoscape-compound-graph && npm run attw -w @dgillard/cytoscape-compound-graph"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.27.7": true
   }
 }

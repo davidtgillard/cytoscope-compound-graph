@@ -432,6 +432,9 @@ describe("compound-graph internals", () => {
     expect(outer.x2).toBeLessThanOrEqual(bounds!.x2);
     expect(outer.y2).toBeLessThanOrEqual(bounds!.y2);
 
+    DEMO_COMPOUND.setViewportPaddingPx(16);
+    expect((DEMO_COMPOUND as unknown as { viewportPaddingPx: number }).viewportPaddingPx).toBe(16);
+
     DEMO_COMPOUND.setClampParentToViewport(false);
     cy.getElementById("wp-invoicing").position({ x: 0, y: 5000 });
     compound.syncParentDragFromCy(cy);

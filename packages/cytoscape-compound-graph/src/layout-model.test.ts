@@ -671,6 +671,21 @@ describe("layout-model move and resize branches", () => {
     expect(outer.y1).toBeCloseTo(startOuter.y1, 3);
   });
 
+  it("resizeComposite tolerates descendant nodes removed from the model map", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent" },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 160 },
+        child: { x: 10, y: 10 },
+      },
+    );
+    model.nodes.delete("child");
+    expect(() => resizeComposite(model, "parent", "se", 20, 20)).not.toThrow();
+  });
+
   it("resizeComposite skips descendants whose parent metadata disappears mid-resize", () => {
     const model = buildLayoutModel(
       [

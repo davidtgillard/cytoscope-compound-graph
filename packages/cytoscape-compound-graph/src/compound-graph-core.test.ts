@@ -104,4 +104,14 @@ describe("compound-graph-core", () => {
     } as cytoscape.Core;
     expect(viewportBoundsInGraphSpace(cy, 8)).toBeNull();
   });
+
+  it("viewportBoundsInGraphSpace returns null for non-positive zoom", () => {
+    const cy = {
+      width: () => 400,
+      height: () => 300,
+      pan: () => ({ x: 0, y: 0 }),
+      zoom: () => 0,
+    } as cytoscape.Core;
+    expect(viewportBoundsInGraphSpace(cy, 8)).toBeNull();
+  });
 });

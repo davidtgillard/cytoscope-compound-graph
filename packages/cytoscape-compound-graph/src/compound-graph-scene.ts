@@ -56,6 +56,7 @@ import {
   type ResizeCorner,
   type WorkPackageLayoutModel,
 } from "./layout-model";
+import { unjamLayoutModel, type UnjamLayoutOptions } from "./layout-unjam";
 
 const SCENE_NODE_RESERVED_KEYS = new Set([
   "id",
@@ -475,6 +476,23 @@ export class CompoundGraphScene {
       constraints,
       this.viewportClampOptions(cy),
     );
+  }
+
+  /**
+   * Separates jammed nodes after `initializeFromCy` when layout cache is missing
+   * or degenerate. Persists only when the caller saves `flatLayout()` after a
+   * changed result.
+   */
+  unjamLoadedLayout(cy: Core, options?: UnjamLayoutOptions): { changed: boolean } {
+    if (!this.model) {
+      throw new Error("layout model not initialized");
+    }
+    const result = unjamLayoutModel(this.model, options);
+    this.model = result.model;
+    if (result.changed) {
+      this.syncToCy(cy);
+    }
+    return { changed: result.changed };
   }
 
   syncToCy(cy: Core): void {
