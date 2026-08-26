@@ -220,6 +220,16 @@ export function buildLayoutModel(
   };
 }
 
+/**
+ * Serialises the model to one `{x, y, w?, h?}` entry per node, `x`/`y` being the stored
+ * parent-relative centre.
+ *
+ * Because the centres are relative, an entry is only meaningful alongside its ancestors'
+ * entries. Most gestures still touch a single entry - {@link moveChild} and
+ * {@link moveComposite} change one centre and nothing else - but {@link resizeComposite}
+ * re-bases every descendant, so saving one entry from a resize is never enough. See
+ * `CompoundGraphScene.flatLayoutForSubtree`.
+ */
 export function flatLayoutFromModel(model: WorkPackageLayoutModel): Record<string, NodePosition> {
   const layout: Record<string, NodePosition> = {};
   for (const [id, node] of model.nodes) {
@@ -769,6 +779,18 @@ export function moveChild(
   return next;
 }
 
+/**
+ * Drags one corner of `compositeId`'s box by (`dxModel`, `dyModel`), holding every other
+ * node - including its own children - exactly where it is.
+ *
+ * Unlike every other gesture, this rewrites more stored centres than the one node the user
+ * grabbed. Moving a corner necessarily moves the box centre by half the drag, and
+ * descendant centres are stored relative to their parent, so {@link applyCompositeOuterBox}
+ * has to subtract that shift back out of each descendant to leave them on screen where
+ * they were. A caller persisting the result per node must therefore save the resized
+ * container *and its whole subtree* (see `CompoundGraphScene.flatLayoutForSubtree`);
+ * saving the container's entry alone re-hydrates to children displaced by half the drag.
+ */
 export function resizeComposite(
   model: WorkPackageLayoutModel,
   compositeId: string,

@@ -20,7 +20,7 @@
 import { describe, expect, it } from "vitest";
 import cytoscape from "cytoscape";
 import { CompoundGraphScene, type CompoundGraphSceneSpec } from "./compound-graph-scene";
-import { ALL_LOOSE_EDGES } from "./layout-model";
+import { ALL_LOOSE_EDGES, absoluteCenter, buildLayoutModel } from "./layout-model";
 import { captureTapstartHandler, headlessCy, syntheticTapstart } from "../tests/helpers/fixtures";
 
 interface RenderedNode {
@@ -66,6 +66,39 @@ function initializedScene(spec = nestedSpec()) {
   const cy = headlessCy(scene.buildElements());
   scene.initializeFromCy(cy);
   return { scene, cy };
+}
+
+/**
+ * Rebuilds a scene from a saved layout the way a consumer does after a reload: the saved
+ * entries hold parent-relative centres, and scene specs take absolute ones, so the
+ * conversion runs through a layout model.
+ */
+function reloadedScene(
+  spec: CompoundGraphSceneSpec,
+  saved: Record<string, { x: number; y: number; w?: number; h?: number }>,
+) {
+  const model = buildLayoutModel(
+    spec.nodes.map((node) => ({
+      id: node.id,
+      parent: node.parent,
+      isCompound: node.kind === "container",
+    })),
+    saved,
+  );
+  return initializedScene({
+    ...spec,
+    nodes: spec.nodes.map((node) => {
+      const absolute = absoluteCenter(model, node.id);
+      const size = model.nodes.get(node.id)?.size;
+      return {
+        ...node,
+        x: absolute.x,
+        y: absolute.y,
+        compoundWidth: size?.w ?? node.compoundWidth,
+        compoundHeight: size?.h ?? node.compoundHeight,
+      };
+    }),
+  });
 }
 
 /** Drives a container drag the way Cytoscape does: move the node, then sync. */
@@ -208,6 +241,29 @@ describe("CompoundGraphScene positional requirements", () => {
 
     expect(after.get("mid")!.size).toEqual({ w: 270, h: 220 });
     expectUnchanged(before, after, ["left", "left-a", "left-b", "right", "mid-a"]);
+  });
+
+  /**
+   * The resize gesture is the only one that changes more saved entries than the node the
+   * user grabbed, so it is the only one where "nothing moved" on screen can still become
+   * "children moved" after a reload. `flatLayoutForSubtree` is what a consumer must save.
+   */
+  it("R4: a resize saved by subtree re-loads to the same picture", () => {
+    const spec = nestedSpec();
+    const { scene, cy } = initializedScene(spec);
+    const before = renderedNodes(cy);
+    const saved = scene.flatLayout();
+
+    const constraints = scene.computeResizeChildConstraints(cy, "left");
+    scene.resizeFromCorner("left", "se", 120, 80, scene.cloneModel(), constraints);
+    scene.syncToCy(cy);
+    expectUnchanged(renderedNodes(cy), before, ["left-a", "left-b"]);
+
+    const reloaded = reloadedScene(spec, { ...saved, ...scene.flatLayoutForSubtree("left") });
+    const after = renderedNodes(reloaded.cy);
+
+    expect(after.get("left")!.size).toEqual({ w: 520, h: 380 });
+    expectUnchanged(before, after, ["left-a", "left-b", "right", "mid", "mid-a"]);
   });
 
   it("R1: a container drag blocked by a neighbour leaves the neighbour alone", () => {

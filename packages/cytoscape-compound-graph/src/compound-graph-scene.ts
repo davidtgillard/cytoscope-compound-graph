@@ -49,6 +49,7 @@ import {
   moveChild,
   resizeComposite,
   resizeLooseEdgesFromOuter,
+  subtreeNodeIds,
   type LayoutModelBuildOptions,
   type LayoutNodeInput,
   type MoveCompositeOptions,
@@ -346,6 +347,37 @@ export class CompoundGraphScene {
       throw new Error("layout model not initialized");
     }
     return flatLayoutFromModel(this.model);
+  }
+
+  /**
+   * Layout entries for `containerId` together with every node nested inside it - the exact
+   * set a corner resize can change.
+   *
+   * Resize is the one gesture whose effect is not confined to the node the user grabbed.
+   * Dragging a corner moves the container's centre by half the drag, and since each
+   * descendant centre is stored relative to its own parent, keeping the descendants
+   * visually still re-bases all of their stored offsets (see {@link resizeComposite}).
+   * A consumer that saves only `flatLayout()[containerId]` after a resize therefore stores
+   * a new container centre against stale child offsets, and every child jumps by half the
+   * drag as soon as that layout is re-hydrated. Save this map instead.
+   *
+   * Drags need no equivalent: `moveChild` and `moveComposite` change one entry.
+   */
+  flatLayoutForSubtree(
+    containerId: string,
+  ): Record<string, { x: number; y: number; w?: number; h?: number }> {
+    if (!this.model) {
+      throw new Error("layout model not initialized");
+    }
+    const full = flatLayoutFromModel(this.model);
+    const subtree: Record<string, { x: number; y: number; w?: number; h?: number }> = {};
+    for (const nodeId of subtreeNodeIds(this.model, containerId)) {
+      const entry = full[nodeId];
+      if (entry) {
+        subtree[nodeId] = entry;
+      }
+    }
+    return subtree;
   }
 
   setEdgeClearance(modelUnits: number): void {

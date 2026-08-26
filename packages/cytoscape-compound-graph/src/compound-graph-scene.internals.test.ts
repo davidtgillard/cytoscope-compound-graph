@@ -754,6 +754,17 @@ describe("CompoundGraphScene internals", () => {
     expect(() => scene.unjamLoadedLayout(cy)).toThrow("layout model not initialized");
   });
 
+  it("flatLayoutForSubtree throws when the layout model is missing", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+      ],
+      edges: [],
+    });
+    asInternal(scene).model = null;
+    expect(() => scene.flatLayoutForSubtree("parent")).toThrow("layout model not initialized");
+  });
+
   it("renderedHandleBox returns null when the model was cleared", () => {
     const scene = CompoundGraphScene.fromSpec({
       nodes: [

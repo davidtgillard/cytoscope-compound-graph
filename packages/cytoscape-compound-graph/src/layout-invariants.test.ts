@@ -10,7 +10,8 @@
  *     container constant.
  * R3. Moving a container must hold the extent of its boundary constant.
  * R4. Changing the extent of a container's boundary must not change the position of any
- *     other node, including its own children.
+ *     other node, including its own children. This must survive a save/re-load, not only
+ *     hold in memory - see "R4 survives being saved and re-loaded" below.
  *
  * Two supporting invariants make R1-R4 meaningful rather than vacuous, and are pinned
  * alongside them because a clamp can trivially satisfy R1-R4 by refusing to move at all,
@@ -30,6 +31,7 @@ import {
   buildLayoutModel,
   compositeInteriorBox,
   compositeOuterBox,
+  flatLayoutFromModel,
   growCompositeToFitChildren,
   moveChild,
   moveComposite,
@@ -176,16 +178,17 @@ function boxIsInside(box: VisualBox, bounds: VisualBox): boolean {
  * a nested container with its own leaf. Deep enough that a relative/absolute mix-up in
  * any layer shows up as a wrong number.
  */
+const NESTED_INPUTS: LayoutNodeInput[] = [
+  { id: "left", isCompound: true },
+  { id: "left-a", parent: "left", footprint: LEAF },
+  { id: "left-b", parent: "left", footprint: LEAF },
+  { id: "right", isCompound: true },
+  { id: "mid", parent: "right", isCompound: true },
+  { id: "mid-a", parent: "mid", footprint: LEAF },
+];
+
 function nestedScenario(): WorkPackageLayoutModel {
-  const inputs: LayoutNodeInput[] = [
-    { id: "left", isCompound: true },
-    { id: "left-a", parent: "left", footprint: LEAF },
-    { id: "left-b", parent: "left", footprint: LEAF },
-    { id: "right", isCompound: true },
-    { id: "mid", parent: "right", isCompound: true },
-    { id: "mid-a", parent: "mid", footprint: LEAF },
-  ];
-  return buildLayoutModel(inputs, {
+  return buildLayoutModel(NESTED_INPUTS, {
     left: { x: 1000, y: 500, w: 400, h: 300 },
     "left-a": { x: -90, y: -30 },
     "left-b": { x: 90, y: -30 },
@@ -396,6 +399,64 @@ describe("positional requirements", () => {
         y2: 900,
       });
       expectExtentChangeOnly(before, after, "left");
+    });
+  });
+
+  /**
+   * R4 held in memory is only half the requirement: a consumer saves the layout, re-loads
+   * it, and must see the same picture. `flatLayoutFromModel` emits *parent-relative*
+   * centres, and a corner resize moves the container's centre by half the drag, so the
+   * resize also re-bases every descendant entry. Save the container's entry on its own and
+   * the new centre is re-hydrated against the old child offsets - which displaces every
+   * child by half the drag, on reload, long after the resize looked correct on screen.
+   *
+   * These two tests pin both halves: the whole-subtree save survives the round trip, and
+   * the container-only save demonstrably does not. The second one exists so that nobody
+   * "simplifies" `flatLayoutForSubtree` back down to a single entry.
+   */
+  describe("R4 survives being saved and re-loaded", () => {
+    /** Re-hydrates the way a consumer does: relative entries in, absolute centres out. */
+    function reload(
+      saved: Record<string, { x: number; y: number; w?: number; h?: number }>,
+    ): WorkPackageLayoutModel {
+      return buildLayoutModel(NESTED_INPUTS, saved);
+    }
+
+    it("holds when the resized container's whole subtree is saved", () => {
+      const before = nestedScenario();
+      const savedBefore = flatLayoutFromModel(before);
+      const after = resizeComposite(before, "left", "se", 120, 80, {
+        childrenBox: null,
+        edgeClearance: 8,
+        looseEdges: ALL_LOOSE_EDGES,
+      });
+
+      const subtreeIds = new Set(subtreeNodeIds(after, "left"));
+      const savedSubtree = Object.fromEntries(
+        Object.entries(flatLayoutFromModel(after)).filter(([id]) => subtreeIds.has(id)),
+      );
+      const reloaded = reload({ ...savedBefore, ...savedSubtree });
+
+      expectExtentChangeOnly(before, reloaded, "left");
+      expect(compositeOuterBox(reloaded, "left")).toEqual(compositeOuterBox(after, "left"));
+    });
+
+    it("does not hold when only the resized container's own entry is saved", () => {
+      const before = nestedScenario();
+      const savedBefore = flatLayoutFromModel(before);
+      const after = resizeComposite(before, "left", "se", 120, 80, {
+        childrenBox: null,
+        edgeClearance: 8,
+        looseEdges: ALL_LOOSE_EDGES,
+      });
+
+      const reloaded = reload({ ...savedBefore, left: flatLayoutFromModel(after).left! });
+
+      // Half of each drag component, the exact amount the box centre moved.
+      expect(absoluteCenter(reloaded, "left-a")).toEqual({
+        x: absoluteCenter(before, "left-a").x + 60,
+        y: absoluteCenter(before, "left-a").y + 40,
+      });
     });
   });
 
