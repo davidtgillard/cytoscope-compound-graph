@@ -495,6 +495,15 @@ export class CompoundGraphScene {
     return { changed: result.changed };
   }
 
+  /**
+   * Applies the current Cytoscape container position through drag clamp math.
+   * Used by bellman-gui's composite drag test hook when synthetic events do not
+   * reliably invoke {@link attachParentDragHandlers}.
+   */
+  applyContainerDragFromCy(cy: Core, containerId: string): void {
+    this.syncParentDragFromCy(cy, containerId);
+  }
+
   syncToCy(cy: Core): void {
     if (!this.model) {
       return;
@@ -742,15 +751,29 @@ export class CompoundGraphScene {
   }
 
   private syncParentDragFromCy(cy: Core, containerId: string): void {
-    const model = this.ensureModelFromCy(cy);
+    if (!this.model) {
+      this.syncModelFromCy(cy);
+    }
+    if (!this.model) {
+      return;
+    }
     const cyParent = cy.getElementById(containerId);
     if (cyParent.empty()) {
       return;
     }
+
+    const cyAbsolute = cyParent.position();
+    const parentId = this.model.parentOf.get(containerId);
+    const parentAbsolute = parentId ? absoluteCenter(this.model, parentId) : { x: 0, y: 0 };
+    const proposedRelative = {
+      x: cyAbsolute.x - parentAbsolute.x,
+      y: cyAbsolute.y - parentAbsolute.y,
+    };
+
     this.model = moveComposite(
-      model,
+      this.model,
       containerId,
-      cyParent.position(),
+      proposedRelative,
       this.viewportClampOptions(cy),
     );
     if (this.model) {

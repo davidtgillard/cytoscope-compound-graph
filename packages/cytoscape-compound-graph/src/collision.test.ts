@@ -90,6 +90,26 @@ describe("collision", () => {
     expect(detectCollision(boxForCenter(result)!, [obstacle])).toBe(false);
   });
 
+  it("resolvePosition avoids obstacles after viewport pre-clamp diverts drag", () => {
+    const bounds = { x1: 3.654, y1: -269.272, x2: 424.987, y2: -47.272 };
+    const obstacle = { x1: 360, y1: -110, x2: 680, y2: 110 };
+    const boxForCenter = (center: { x: number; y: number }) => ({
+      x1: center.x - 210,
+      y1: center.y - 140,
+      x2: center.x + 210,
+      y2: center.y + 140,
+    });
+    const result = resolvePosition({
+      from: { x: 0, y: 0 },
+      to: { x: 800, y: 0 },
+      bounds,
+      obstacles: [obstacle],
+      boxForCenter,
+    });
+    expect(detectCollision(boxForCenter(result)!, [obstacle])).toBe(false);
+    expect(result.x).toBeLessThan(200);
+  });
+
   it("resolvePosition returns center unchanged when boxForCenter returns null inside bounds", () => {
     const bounds = { x1: 0, y1: 0, x2: 100, y2: 100 };
     const result = resolvePosition({

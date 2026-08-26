@@ -248,6 +248,28 @@ describe("layout-unjam", () => {
     expect(changed).toBe(true);
   });
 
+  it("does not rewrite the overlap-scenario preset layout", () => {
+    const overlapInputs = [
+      { id: "parent", isCompound: true },
+      { id: "c", isCompound: true },
+      { id: "cchild", parent: "c", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+      { id: "a", parent: "parent", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+      { id: "b", parent: "parent", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+    ];
+    const overlapLayout = {
+      parent: { x: 0, y: 0, w: 420, h: 280 },
+      c: { x: 520, y: 0, w: 320, h: 220 },
+      cchild: { x: 0, y: 0 },
+      a: { x: -90, y: -30 },
+      b: { x: 90, y: -30 },
+    };
+    const model = buildLayoutModel(overlapInputs, overlapLayout);
+    const { model: unjammed, changed } = unjamLayoutModel(model);
+    expect(changed).toBe(false);
+    expect(nodesOverlapInModel(unjammed, "parent", "c")).toBe(false);
+    expect(flatLayoutFromModel(unjammed)).toEqual(flatLayoutFromModel(model));
+  });
+
   it("unjams nested composites deepest-first and grows parent when needed", () => {
     const nestedInputs = [
       { id: "root", isCompound: true },

@@ -691,12 +691,22 @@ export class GraphParentVertex {
   }
 
   private syncParentDragFromCy(cy: Core): void {
-    const model = this.ensureModelFromCy(cy);
+    if (!this.model) {
+      this.syncModelFromCy(cy);
+    }
+    if (!this.model) {
+      return;
+    }
     const cyParent = cy.getElementById(this.id);
     if (cyParent.empty()) {
       return;
     }
-    this.model = moveComposite(model, this.id, cyParent.position(), this.viewportClampOptions(cy));
+    this.model = moveComposite(
+      this.model,
+      this.id,
+      cyParent.position(),
+      this.viewportClampOptions(cy),
+    );
     if (this.model) {
       pinContainerToModel(cy, this.model, this.id);
       applySubtreePositionsToCy(cy, this.model, this.id);

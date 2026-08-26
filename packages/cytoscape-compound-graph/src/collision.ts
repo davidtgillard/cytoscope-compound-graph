@@ -76,6 +76,20 @@ function keepInside(
   return { x: center.x + dx, y: center.y + dy };
 }
 
+function keepInsideUnlessObstacleOverlap(
+  center: Point,
+  bounds: VisualBox | null,
+  obstacles: VisualBox[],
+  boxForCenter: (center: Point) => VisualBox | null,
+): Point {
+  const clamped = keepInside(center, bounds, boxForCenter);
+  const box = boxForCenter(clamped);
+  if (box && obstacles.length > 0 && detectCollision(box, obstacles)) {
+    return center;
+  }
+  return clamped;
+}
+
 /**
  * Binary-searches the line from `from` to `to` for the point closest to `to` whose box
  * does not collide with any `obstacles`. Assumes `from` itself is collision-free (it's
@@ -123,11 +137,9 @@ function resolveAgainstObstacles(
 }
 
 /**
- * Resolves a proposed move from `from` to `to`: keeps the box inside `bounds` (if any),
- * then pushes it back out of any `obstacles` it still collides with, then re-clamps to
- * `bounds` once more. The extra containment pass is cheap insurance - pushing out of an
- * obstacle can't carry the box back outside bounds it already satisfied, since the
- * binary search only ever moves the candidate back toward the known-good `from` point.
+ * Resolves a proposed move from `from` to `to`: clamps against obstacles along the
+ * intended drag segment first, then keeps the box inside `bounds`, then repeats both
+ * passes so viewport clamping cannot reintroduce sibling overlap on a diverted path.
  */
 /** @internal */
 export function resolvePosition(params: {
@@ -138,8 +150,10 @@ export function resolvePosition(params: {
   boxForCenter: (center: Point) => VisualBox | null;
 }): Point {
   const { from, to, bounds = null, obstacles = [], boxForCenter } = params;
-  let candidate = keepInside(to, bounds, boxForCenter);
-  candidate = resolveAgainstObstacles(from, candidate, obstacles, boxForCenter);
-  candidate = keepInside(candidate, bounds, boxForCenter);
+  let candidate = resolveAgainstObstacles(from, to, obstacles, boxForCenter);
+  const obstacleSafe = { ...candidate };
+  candidate = keepInsideUnlessObstacleOverlap(candidate, bounds, obstacles, boxForCenter);
+  candidate = resolveAgainstObstacles(obstacleSafe, candidate, obstacles, boxForCenter);
+  candidate = keepInsideUnlessObstacleOverlap(candidate, bounds, obstacles, boxForCenter);
   return candidate;
 }

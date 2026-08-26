@@ -70,6 +70,7 @@ export {
   buildLayoutModel,
   flatLayoutFromModel,
   cloneLayoutModel,
+  nodesOverlapInModel,
   OVERFLOW_NODE_PREFIX,
   isOverflowNodeId,
   type LayoutNodeInput,

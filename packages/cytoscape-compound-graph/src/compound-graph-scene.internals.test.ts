@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { CompoundGraphScene } from "./compound-graph-scene";
+import { nodesOverlapInModel } from "./layout-model";
 import { captureTapstartHandler, headlessCy, syntheticTapstart } from "../tests/helpers/fixtures";
 
 type SceneInternals = {
@@ -50,6 +51,161 @@ describe("CompoundGraphScene internals", () => {
     internal.model = null;
     expect(() => internal.finishChildDrag(cy)).not.toThrow();
     expect(internal.childDragActive).toBe(false);
+  });
+
+  it("syncParentDragFromCy clamps composite drag against sibling obstacles", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "parent",
+          label: "parent",
+          color: "#64748b",
+          kind: "container",
+          x: 0,
+          y: 0,
+          compoundWidth: 420,
+          compoundHeight: 280,
+        },
+        {
+          id: "neighbor",
+          label: "neighbor",
+          color: "#64748b",
+          kind: "container",
+          x: 520,
+          y: 0,
+          compoundWidth: 320,
+          compoundHeight: 220,
+        },
+      ],
+      edges: [],
+      clampParentToViewport: false,
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    cy.getElementById("parent").position({ x: 800, y: 0 });
+
+    internal.syncParentDragFromCy(cy, "parent");
+
+    const model = scene.getModel();
+    expect(model).not.toBeNull();
+    expect(nodesOverlapInModel(model!, "parent", "neighbor")).toBe(false);
+    expect(model!.nodes.get("neighbor")?.center).toEqual({ x: 520, y: 0 });
+  });
+
+  it("syncParentDragFromCy clamps against neighbors with viewport clamp enabled", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "parent",
+          label: "parent",
+          color: "#64748b",
+          kind: "container",
+          x: 0,
+          y: 0,
+          compoundWidth: 420,
+          compoundHeight: 280,
+        },
+        {
+          id: "neighbor",
+          label: "neighbor",
+          color: "#64748b",
+          kind: "container",
+          x: 520,
+          y: 0,
+          compoundWidth: 320,
+          compoundHeight: 220,
+        },
+      ],
+      edges: [],
+      clampParentToViewport: true,
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    vi.spyOn(cy, "width").mockReturnValue(900);
+    vi.spyOn(cy, "height").mockReturnValue(700);
+    cy.zoom(1);
+    cy.pan({ x: 120, y: 80 });
+    scene.initializeFromCy(cy);
+    cy.getElementById("parent").position({ x: 800, y: 0 });
+
+    internal.syncParentDragFromCy(cy, "parent");
+
+    const model = scene.getModel();
+    expect(model).not.toBeNull();
+    expect(nodesOverlapInModel(model!, "parent", "neighbor")).toBe(false);
+    expect(model!.nodes.get("neighbor")?.center).toEqual({ x: 520, y: 0 });
+  });
+
+  it("syncParentDragFromCy clamps against neighbors with children and viewport clamp", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "parent",
+          label: "parent",
+          color: "#64748b",
+          kind: "container",
+          x: 0,
+          y: 0,
+          compoundWidth: 420,
+          compoundHeight: 280,
+        },
+        {
+          id: "child-a",
+          label: "child-a",
+          color: "#94a3b8",
+          kind: "leaf",
+          parent: "parent",
+          x: -90,
+          y: -30,
+        },
+        {
+          id: "child-b",
+          label: "child-b",
+          color: "#94a3b8",
+          kind: "leaf",
+          parent: "parent",
+          x: 90,
+          y: -30,
+        },
+        {
+          id: "neighbor",
+          label: "neighbor",
+          color: "#64748b",
+          kind: "container",
+          x: 520,
+          y: 0,
+          compoundWidth: 320,
+          compoundHeight: 220,
+        },
+        {
+          id: "neighbor-child",
+          label: "neighbor-child",
+          color: "#94a3b8",
+          kind: "leaf",
+          parent: "neighbor",
+          x: 0,
+          y: 0,
+        },
+      ],
+      edges: [],
+      clampParentToViewport: true,
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    vi.spyOn(cy, "width").mockReturnValue(900);
+    vi.spyOn(cy, "height").mockReturnValue(700);
+    cy.zoom(1);
+    cy.pan({ x: 120, y: 80 });
+    scene.initializeFromCy(cy);
+    cy.getElementById("parent").position({ x: 800, y: 0 });
+
+    internal.syncParentDragFromCy(cy, "parent");
+
+    const model = scene.getModel();
+    expect(model).not.toBeNull();
+    expect(nodesOverlapInModel(model!, "parent", "neighbor")).toBe(false);
+    expect(model!.nodes.get("neighbor")?.center).toEqual({ x: 520, y: 0 });
   });
 
   it("syncParentDragFromCy no-ops when the container element is missing", () => {

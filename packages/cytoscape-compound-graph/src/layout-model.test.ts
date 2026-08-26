@@ -359,6 +359,29 @@ describe("layout-model move and resize branches", () => {
     expect(nodesOverlapInModel(moved, "left", "right")).toBe(false);
   });
 
+  it("moveComposite clamps sibling overlap after viewport pre-clamp (e2e pan/zoom regression)", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "neighbor", isCompound: true },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 420, h: 280 },
+        neighbor: { x: 520, y: 0, w: 320, h: 220 },
+      },
+    );
+    const viewportBounds = {
+      x1: 3.6539795876791175,
+      y1: -269.27162972961855,
+      x2: 424.987326012437,
+      y2: -47.27162972961855,
+    };
+    const moved = moveComposite(model, "parent", { x: 800, y: 0 }, { viewportBounds });
+    expect(nodesOverlapInModel(moved, "parent", "neighbor")).toBe(false);
+    const center = absoluteCenter(moved, "parent");
+    expect(center.x).toBeLessThan(200);
+  });
+
   it("moveComposite no-ops for non-compound ids", () => {
     const model = buildLayoutModel([{ id: "leaf" }], { leaf: { x: 0, y: 0 } });
     expect(moveComposite(model, "leaf", { x: 10, y: 10 })).toEqual(model);
