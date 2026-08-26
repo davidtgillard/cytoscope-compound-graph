@@ -112,6 +112,14 @@ export function measureContainerFromCy(cy: Core, containerId: string, childIds: 
   });
 }
 
+/**
+ * Writes a container's model size and position back to Cytoscape.
+ *
+ * Cytoscape positions are always global, while `LayoutNode.center` is relative to the
+ * node's immediate parent (see layoutModelFromCy), so this must go through
+ * {@link absoluteCenter}. Writing the relative center straight through happens to work
+ * for a root container but teleports a nested one to its parent-relative offset.
+ */
 export function pinContainerToModel(
   cy: Core,
   model: WorkPackageLayoutModel,
@@ -126,10 +134,11 @@ export function pinContainerToModel(
   if (cyParent.empty()) {
     return;
   }
+  const absolute = absoluteCenter(model, containerId);
   cy.batch(() => {
     cyParent.data("compoundWidth", parentSize.w);
     cyParent.data("compoundHeight", parentSize.h);
-    cyParent.position({ x: parentNode.center.x, y: parentNode.center.y });
+    cyParent.position({ x: absolute.x, y: absolute.y });
   });
 }
 

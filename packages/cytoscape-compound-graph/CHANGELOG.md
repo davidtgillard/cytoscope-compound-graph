@@ -5,6 +5,8 @@
 Package renamed from `@dgillard/nested-cytoscope-vertex` to `@dgillard/cytoscape-compound-graph`.
 
 - Viewport clamping during parent drag and corner resize keeps compounds inside the visible Cytoscape container (`clampParentToViewport`, `viewportPaddingPx` on theme and `GraphParentVertex` / `CompoundGraphScene`; enabled by default)
+- Load-time unjam separates compounds and children that arrive stacked or outside their container, growing containers only as far as needed
+- Drags and resizes now hold their positional guarantees regardless of unjam, viewport clamping, or nesting depth: a drag moves only the dragged subtree, a container drag is a rigid translation of constant extent, and a resize moves nothing at all (see `layout-invariants.test.ts` and `compound-graph-scene.invariants.test.ts`)
 
 - `CompoundGraphScene` graph-wide coordinator for multiple nested compounds on one canvas
 - Exported layout model APIs: `buildLayoutModel`, `flatLayoutFromModel`, `cloneLayoutModel`, `LayoutNodeInput`, `WorkPackageLayoutModel`, `LayoutNode`

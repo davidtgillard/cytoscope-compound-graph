@@ -76,20 +76,6 @@ function keepInside(
   return { x: center.x + dx, y: center.y + dy };
 }
 
-function keepInsideUnlessObstacleOverlap(
-  center: Point,
-  bounds: VisualBox | null,
-  obstacles: VisualBox[],
-  boxForCenter: (center: Point) => VisualBox | null,
-): Point {
-  const clamped = keepInside(center, bounds, boxForCenter);
-  const box = boxForCenter(clamped);
-  if (box && obstacles.length > 0 && detectCollision(box, obstacles)) {
-    return center;
-  }
-  return clamped;
-}
-
 /**
  * Binary-searches the line from `from` to `to` for the point closest to `to` whose box
  * does not collide with any `obstacles`. Assumes `from` itself is collision-free (it's
@@ -137,9 +123,25 @@ function resolveAgainstObstacles(
 }
 
 /**
- * Resolves a proposed move from `from` to `to`: clamps against obstacles along the
- * intended drag segment first, then keeps the box inside `bounds`, then repeats both
- * passes so viewport clamping cannot reintroduce sibling overlap on a diverted path.
+ * Resolves a proposed move from `from` to `to` in exactly two ordered steps: pull the
+ * *target* inside `bounds`, then binary-search the `from`→target segment for the point
+ * closest to the target that clears `obstacles`.
+ *
+ * The order matters, and so does the fact that nothing runs after the obstacle search.
+ * Containment is a set of linear inequalities on the center (`center.x >= bounds.x1 +
+ * halfW`, and so on), so it is convex: every point interpolated between two centers
+ * whose boxes fit inside `bounds` also fits inside `bounds`. Because `from` is the last
+ * known-good rest position and the target has already been pulled inside, the search
+ * therefore cannot hand back an out-of-bounds center - which is why no second
+ * containment pass is needed. Adding one back would be actively harmful: a containment
+ * shift applied *after* the search is a blind translation that can slide the box into an
+ * obstacle the search just cleared.
+ *
+ * Two invariants follow, and {@link file://./collision.test.ts} pins both:
+ * - the result never overlaps an obstacle, since the obstacle search has the last word;
+ * - if `from` satisfied `bounds`, so does the result. When `from` starts outside
+ *   `bounds` (a box larger than the viewport, say) containment is merely best-effort,
+ *   and staying clear of obstacles wins.
  */
 /** @internal */
 export function resolvePosition(params: {
@@ -150,10 +152,6 @@ export function resolvePosition(params: {
   boxForCenter: (center: Point) => VisualBox | null;
 }): Point {
   const { from, to, bounds = null, obstacles = [], boxForCenter } = params;
-  let candidate = resolveAgainstObstacles(from, to, obstacles, boxForCenter);
-  const obstacleSafe = { ...candidate };
-  candidate = keepInsideUnlessObstacleOverlap(candidate, bounds, obstacles, boxForCenter);
-  candidate = resolveAgainstObstacles(obstacleSafe, candidate, obstacles, boxForCenter);
-  candidate = keepInsideUnlessObstacleOverlap(candidate, bounds, obstacles, boxForCenter);
-  return candidate;
+  const boundedTarget = keepInside(to, bounds, boxForCenter);
+  return resolveAgainstObstacles(from, boundedTarget, obstacles, boxForCenter);
 }

@@ -21,7 +21,7 @@ import {
   cloneLayoutModel,
   compositeInteriorBox,
   compositeOuterBox,
-  minimumCompositeOuterBox,
+  growCompositeToFitChildren,
   moveChild,
   moveComposite,
   visualBox,
@@ -125,15 +125,6 @@ function boxInsideBounds(box: VisualBox, bounds: VisualBox): boolean {
   return Math.abs(dx) <= EPSILON && Math.abs(dy) <= EPSILON;
 }
 
-function boxesEqual(left: VisualBox, right: VisualBox): boolean {
-  return (
-    Math.abs(left.x1 - right.x1) <= EPSILON &&
-    Math.abs(left.y1 - right.y1) <= EPSILON &&
-    Math.abs(left.x2 - right.x2) <= EPSILON &&
-    Math.abs(left.y2 - right.y2) <= EPSILON
-  );
-}
-
 function centersEqual(left: Point, right: Point): boolean {
   return Math.abs(left.x - right.x) <= EPSILON && Math.abs(left.y - right.y) <= EPSILON;
 }
@@ -156,6 +147,17 @@ function obstacleBoxesFor(
   return boxes;
 }
 
+/** True when `nodeId`'s visual box clears every node it is not allowed to overlap. */
+function clearsObstacles(model: WorkPackageLayoutModel, nodeId: string): boolean {
+  const box = visualBox(model, nodeId);
+  /* v8 ignore start -- visualBox is null only when the node is missing */
+  if (!box) {
+    return false;
+  }
+  /* v8 ignore stop */
+  return !obstacleBoxesFor(model, nodeId).some((obstacle) => boxesOverlap(box, obstacle));
+}
+
 /**
  * Valid rest: visual box clears non-ancestor obstacles and the fit box lies
  * inside the parent interior (when parented).
@@ -166,17 +168,8 @@ export function isValidRest(model: WorkPackageLayoutModel, nodeId: string): bool
     return true;
   }
 
-  const box = visualBox(model, nodeId);
-  /* v8 ignore start -- visualBox is null only when the node is missing */
-  if (!box) {
+  if (!clearsObstacles(model, nodeId)) {
     return false;
-  }
-  /* v8 ignore stop */
-
-  for (const obstacle of obstacleBoxesFor(model, nodeId)) {
-    if (boxesOverlap(box, obstacle)) {
-      return false;
-    }
   }
 
   const parentId = model.parentOf.get(nodeId);
@@ -336,79 +329,93 @@ function collectSiblingGroups(model: WorkPackageLayoutModel): SiblingGroup[] {
   return groups;
 }
 
-/** Grow-only: expand parent outer box so all direct children fit with edge clearance. */
-function growParentToFitChildren(
-  model: WorkPackageLayoutModel,
-  compositeId: string,
-): boolean {
-  const node = model.nodes.get(compositeId);
-  const currentOuter = compositeOuterBox(model, compositeId);
-  const minOuter = minimumCompositeOuterBox(model, compositeId);
-  /* v8 ignore start -- grow-only passes skip unsized or non-compound ids */
-  if (!node?.isCompound || !node.size || !currentOuter || !minOuter) {
-    return false;
-  }
-  /* v8 ignore stop */
-
-  const merged: VisualBox = {
-    x1: Math.min(currentOuter.x1, minOuter.x1),
-    y1: Math.min(currentOuter.y1, minOuter.y1),
-    x2: Math.max(currentOuter.x2, minOuter.x2),
-    y2: Math.max(currentOuter.y2, minOuter.y2),
-  };
-
-  if (boxesEqual(currentOuter, merged)) {
-    return false;
-  }
-
-  const parentId = model.parentOf.get(compositeId);
+/**
+ * Moves `nodeId` so that its absolute centre lands on `absolute`.
+ *
+ * Placement works entirely in absolute coordinates even though the model stores
+ * parent-relative centres, because growing a container shifts its centre and therefore
+ * re-bases every relative offset underneath it (see growCompositeToFitChildren). A search
+ * anchored in relative coordinates would silently slide its own candidates sideways the
+ * moment it grew the container it was searching inside.
+ */
+function parkAt(model: WorkPackageLayoutModel, nodeId: string, absolute: Point): void {
+  const parentId = model.parentOf.get(nodeId);
   const parentAbsolute = parentId ? absoluteCenter(model, parentId) : { x: 0, y: 0 };
-  const absCenter = {
-    x: (merged.x1 + merged.x2) / 2,
-    y: (merged.y1 + merged.y2) / 2,
-  };
-
-  node.size = { w: merged.x2 - merged.x1, h: merged.y2 - merged.y1 };
-  setNodeCenter(model, compositeId, {
-    x: absCenter.x - parentAbsolute.x,
-    y: absCenter.y - parentAbsolute.y,
+  setNodeCenter(model, nodeId, {
+    x: absolute.x - parentAbsolute.x,
+    y: absolute.y - parentAbsolute.y,
   });
-  return true;
+}
+
+/**
+ * Sweeps candidate absolute positions on rings around `startAbsolute`, leaving `nodeId`
+ * parked on whichever candidate it visited last.
+ *
+ * `roomNeeded` is the first candidate that cleared every obstacle but did not fit inside
+ * the container's interior - the deliberate place to grow the container towards when no
+ * ring yields a valid rest, rather than growing towards wherever probing happened to end.
+ */
+function sweepRings(
+  model: WorkPackageLayoutModel,
+  nodeId: string,
+  startAbsolute: Point,
+  options: UnjamLayoutOptions,
+): { placed: Point | null; roomNeeded: Point | null } {
+  const ringStep = options.ringStep ?? defaultRingStep(model, nodeId);
+  const maxRings = options.maxRings ?? DEFAULT_MAX_RINGS;
+  let roomNeeded: Point | null = null;
+
+  for (let ring = 0; ring <= maxRings; ring++) {
+    const samples = ring === 0 ? 1 : Math.max(8, ring * 6);
+    for (let index = 0; index < samples; index++) {
+      const angle = ring === 0 ? 0 : (index / samples) * Math.PI * 2;
+      const candidate = {
+        x: startAbsolute.x + Math.cos(angle) * ringStep * ring,
+        y: startAbsolute.y + Math.sin(angle) * ringStep * ring,
+      };
+      parkAt(model, nodeId, candidate);
+      if (isValidRest(model, nodeId) && isLocallyFree(model, nodeId, options)) {
+        return { placed: candidate, roomNeeded: null };
+      }
+      if (!roomNeeded && clearsObstacles(model, nodeId)) {
+        roomNeeded = candidate;
+      }
+    }
+  }
+
+  return { placed: null, roomNeeded };
 }
 
 function tryRingSearchPlacement(
   model: WorkPackageLayoutModel,
   nodeId: string,
-  startCenter: Point,
+  startAbsolute: Point,
   options: UnjamLayoutOptions,
-): Point | null {
-  const ringStep = options.ringStep ?? defaultRingStep(model, nodeId);
-  const maxRings = options.maxRings ?? DEFAULT_MAX_RINGS;
+): { placed: Point | null; grew: boolean } {
+  const parentId = model.parentOf.get(nodeId);
+  let grew = false;
 
   for (let growAttempt = 0; growAttempt < MAX_GROW_ATTEMPTS; growAttempt++) {
-    for (let ring = 0; ring <= maxRings; ring++) {
-      const samples = ring === 0 ? 1 : Math.max(8, ring * 6);
-      for (let index = 0; index < samples; index++) {
-        const angle = ring === 0 ? 0 : (index / samples) * Math.PI * 2;
-        const candidate = {
-          x: startCenter.x + Math.cos(angle) * ringStep * ring,
-          y: startCenter.y + Math.sin(angle) * ringStep * ring,
-        };
-        setNodeCenter(model, nodeId, candidate);
-        if (isValidRest(model, nodeId) && isLocallyFree(model, nodeId, options)) {
-          return candidate;
-        }
-      }
+    const sweep = sweepRings(model, nodeId, startAbsolute, options);
+    if (sweep.placed) {
+      return { placed: sweep.placed, grew };
     }
-
-    const parentId = model.parentOf.get(nodeId);
-    if (parentId && growParentToFitChildren(model, parentId)) {
-      continue;
+    if (!parentId || !sweep.roomNeeded) {
+      break;
     }
-    break;
+    // Park on the obstacle-free candidate so the container grows towards it, then
+    // re-sweep: the enlarged interior usually admits that candidate outright.
+    parkAt(model, nodeId, sweep.roomNeeded);
+    if (!growCompositeToFitChildren(model, parentId)) {
+      break;
+    }
+    grew = true;
   }
 
-  return null;
+  // Probing must not leave the node parked on a rejected candidate; the caller's fallback
+  // placement is measured from `startAbsolute`.
+  parkAt(model, nodeId, startAbsolute);
+  return { placed: null, grew };
 }
 
 function tryPlaceNode(
@@ -428,34 +435,22 @@ function tryPlaceNode(
     return false;
   }
 
-  const startCenter = { ...node.center };
-  /* v8 ignore start -- redundant with the fully-impeded guard above */
-  if (
-    !options.bootstrap &&
-    isValidRest(model, nodeId) &&
-    isLocallyFree(model, nodeId, options)
-  ) {
-    return false;
-  }
-  /* v8 ignore stop */
-
-  const placed = tryRingSearchPlacement(model, nodeId, startCenter, options);
+  const startAbsolute = absoluteCenter(model, nodeId);
+  const { placed, grew } = tryRingSearchPlacement(model, nodeId, startAbsolute, options);
   if (placed) {
-    return !centersEqual(startCenter, placed);
+    return grew || !centersEqual(startAbsolute, placed);
   }
 
   // Last resort: deterministic offset so deeply nested stacks still separate.
   const ringStep = options.ringStep ?? defaultRingStep(model, nodeId);
   const fallback = {
-    x: startCenter.x + ringStep * (sortedIndex + 1),
-    y: startCenter.y + ringStep * 0.5 * (sortedIndex + 1),
+    x: startAbsolute.x + ringStep * (sortedIndex + 1),
+    y: startAbsolute.y + ringStep * 0.5 * (sortedIndex + 1),
   };
-  setNodeCenter(model, nodeId, fallback);
+  parkAt(model, nodeId, fallback);
   const parentId = model.parentOf.get(nodeId);
-  if (parentId) {
-    growParentToFitChildren(model, parentId);
-  }
-  return !centersEqual(startCenter, fallback);
+  const grewForFallback = parentId ? growCompositeToFitChildren(model, parentId) : false;
+  return grew || grewForFallback || !centersEqual(startAbsolute, fallback);
 }
 
 /**
@@ -477,7 +472,7 @@ export function unjamLayoutModel(
       }
     }
 
-    if (group.parentId && growParentToFitChildren(next, group.parentId)) {
+    if (group.parentId && growCompositeToFitChildren(next, group.parentId)) {
       changed = true;
     }
   }

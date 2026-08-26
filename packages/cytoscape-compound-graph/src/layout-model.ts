@@ -593,6 +593,94 @@ function resolveResizeBoxAgainstObstacles(
   return best;
 }
 
+/**
+ * Rewrites a compound's outer box (absolute graph coordinates) while holding every
+ * descendant's absolute center constant.
+ *
+ * This is the single place that encodes the rule "changing a container's extent must not
+ * move anything else": descendant centers are stored relative to their own parent, so any
+ * change to a compound's center silently drags its whole subtree along unless the offsets
+ * are rewritten afterwards. Descendants are re-parented shallowest-first so each one sees
+ * an already-corrected parent center. The compound's own center is likewise stored
+ * relative to *its* parent, hence the `parentAbsolute` subtraction.
+ */
+function applyCompositeOuterBox(
+  model: WorkPackageLayoutModel,
+  compositeId: string,
+  outer: VisualBox,
+): void {
+  const descendants = [...descendantIds(model, compositeId)]
+    .filter((id) => id !== compositeId)
+    .sort((leftId, rightId) => modelDepth(model, leftId) - modelDepth(model, rightId));
+  const savedAbsolute = new Map<string, { x: number; y: number }>();
+  for (const descendantId of descendants) {
+    savedAbsolute.set(descendantId, absoluteCenter(model, descendantId));
+  }
+
+  const parentId = model.parentOf.get(compositeId);
+  const parentAbsolute = parentId ? absoluteCenter(model, parentId) : { x: 0, y: 0 };
+
+  const node = model.nodes.get(compositeId)!;
+  node.size = { w: outer.x2 - outer.x1, h: outer.y2 - outer.y1 };
+  setNodeCenter(model, compositeId, {
+    x: (outer.x1 + outer.x2) / 2 - parentAbsolute.x,
+    y: (outer.y1 + outer.y2) / 2 - parentAbsolute.y,
+  });
+
+  for (const descendantId of descendants) {
+    const saved = savedAbsolute.get(descendantId)!;
+    const ownParentAbsolute = absoluteCenter(model, model.parentOf.get(descendantId)!);
+    setNodeCenter(model, descendantId, {
+      x: saved.x - ownParentAbsolute.x,
+      y: saved.y - ownParentAbsolute.y,
+    });
+  }
+}
+
+/**
+ * Grows `compositeId`'s outer box just far enough to contain all of its direct children
+ * with edge clearance, never shrinking it, holding every descendant's absolute center
+ * constant. Returns true when the box actually changed.
+ *
+ * Used by load-time unjam (see layout-unjam.ts) to make room for nodes it has separated;
+ * live resize goes through {@link resizeComposite} instead.
+ */
+/** @internal */
+export function growCompositeToFitChildren(
+  model: WorkPackageLayoutModel,
+  compositeId: string,
+): boolean {
+  const node = model.nodes.get(compositeId);
+  const currentOuter = compositeOuterBox(model, compositeId);
+  const minimumOuter = minimumCompositeOuterBox(model, compositeId);
+  if (!node?.isCompound || !node.size || !currentOuter || !minimumOuter) {
+    return false;
+  }
+
+  const merged: VisualBox = {
+    x1: Math.min(currentOuter.x1, minimumOuter.x1),
+    y1: Math.min(currentOuter.y1, minimumOuter.y1),
+    x2: Math.max(currentOuter.x2, minimumOuter.x2),
+    y2: Math.max(currentOuter.y2, minimumOuter.y2),
+  };
+  if (boxesEqual(currentOuter, merged)) {
+    return false;
+  }
+
+  applyCompositeOuterBox(model, compositeId, merged);
+  return true;
+}
+
+function boxesEqual(left: VisualBox, right: VisualBox): boolean {
+  const epsilon = 1e-6;
+  return (
+    Math.abs(left.x1 - right.x1) <= epsilon &&
+    Math.abs(left.y1 - right.y1) <= epsilon &&
+    Math.abs(left.x2 - right.x2) <= epsilon &&
+    Math.abs(left.y2 - right.y2) <= epsilon
+  );
+}
+
 export interface ViewportClampOptions {
   /** Graph-space bounds the compound outer box must stay inside (e.g. visible viewport). */
   viewportBounds?: VisualBox | null;
@@ -730,39 +818,7 @@ export function resizeComposite(
     }
   }
 
-  const savedAbsolute = new Map<string, { x: number; y: number }>();
-  for (const descendantId of descendantIds(next, compositeId)) {
-    if (descendantId === compositeId) {
-      continue;
-    }
-    savedAbsolute.set(descendantId, absoluteCenter(next, descendantId));
-  }
-
-  const w = clampedOuter.x2 - clampedOuter.x1;
-  const h = clampedOuter.y2 - clampedOuter.y1;
-  node.size = { w, h };
-  setNodeCenter(next, compositeId, {
-    x: (clampedOuter.x1 + clampedOuter.x2) / 2,
-    y: (clampedOuter.y1 + clampedOuter.y2) / 2,
-  });
-
-  const descendants = [...descendantIds(next, compositeId)].filter((id) => id !== compositeId);
-  descendants.sort(
-    (leftId, rightId) => modelDepth(next, leftId) - modelDepth(next, rightId),
-  );
-  for (const descendantId of descendants) {
-    const saved = savedAbsolute.get(descendantId);
-    const parentId = next.parentOf.get(descendantId);
-    if (!saved || !parentId) {
-      continue;
-    }
-    const parentAbsolute = absoluteCenter(next, parentId);
-    setNodeCenter(next, descendantId, {
-      x: saved.x - parentAbsolute.x,
-      y: saved.y - parentAbsolute.y,
-    });
-  }
-
+  applyCompositeOuterBox(next, compositeId, clampedOuter);
   return next;
 }
 
