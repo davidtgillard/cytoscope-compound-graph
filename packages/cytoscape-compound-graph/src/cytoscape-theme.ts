@@ -20,8 +20,10 @@ export interface CompoundGraphTheme {
   leafNode: { diameter: number };
   leafSelection: { outlineWidth: number; outlineColor: string };
   /**
-   * How close a child's measured footprint may get to the parent's border while being
-   * dragged, in screen pixels (converted to model units via {@link GraphParentVertex.setEdgeClearance}).
+   * How close a child's measured footprint (shape plus the CSS line-box of its label)
+   * may get to the parent's outer border while being dragged, in screen pixels. Converted
+   * to model units via {@link GraphParentVertex.setEdgeClearance}. Must be >= 0: a negative
+   * value lets the child sit on the perimeter, after which a later clamp jumps it back.
    */
   childEdgeClearancePx: number;
   /**
@@ -58,7 +60,7 @@ export const DEFAULT_COMPOUND_GRAPH_THEME: CompoundGraphTheme = {
   },
   leafNode: { diameter: 36 },
   leafSelection: { outlineWidth: 3, outlineColor: "#38bdf8" },
-  childEdgeClearancePx: -5,
+  childEdgeClearancePx: 2,
   nodeOverlapPadding: 8,
   clampParentToViewport: true,
   viewportPaddingPx: 8,

@@ -2,8 +2,6 @@ import type { Core, EventObject } from "cytoscape";
 import cytoscape from "cytoscape";
 import { applyLayoutModelToCy, layoutModelFromCy } from "./cytoscape-sync";
 import {
-  CHILD_EDGE_CLEARANCE_PX,
-  COMPOUND_PADDING,
   LEAF_LABEL_COLOR,
   LEAF_LABEL_FONT_FAMILY,
   LEAF_LABEL_FONT_SIZE,
@@ -24,6 +22,7 @@ import {
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
+  pinLeafToModel,
   renderedContainerBoxFromModel,
   restoreLeafVisibility,
   viewportBoundsInGraphSpace,
@@ -31,7 +30,6 @@ import {
 import type { ChildDragVisual, ParentDragVisual } from "./compound-graph";
 import {
   compoundAbsolutePosition,
-  childrenFitBoxAbsoluteFromCy,
   syncLeafFootprintsFromCy,
 } from "./cytoscape-utils";
 import {
@@ -41,12 +39,14 @@ import {
 } from "./drag-listeners";
 import {
   absoluteCenter,
+  childrenFitBoxAbsolute,
   cloneLayoutModel,
   compositeOuterBox,
   flatLayoutFromModel,
   isOverflowNodeId,
   moveComposite,
   moveChild,
+  resolvedEdgeClearance,
   resizeComposite,
   resizeLooseEdgesFromOuter,
   subtreeNodeIds,
@@ -384,10 +384,11 @@ export class CompoundGraphScene {
     if (!this.model) {
       return;
     }
+    const clearance = Number.isFinite(modelUnits) ? Math.max(0, modelUnits) : 0;
     for (const containerId of this.containerIds()) {
       const node = this.model.nodes.get(containerId);
       if (node) {
-        node.reservedEdge = modelUnits;
+        node.reservedEdge = clearance;
       }
     }
   }
@@ -404,8 +405,11 @@ export class CompoundGraphScene {
     if (!model) {
       return;
     }
+    const skipIds = this.childDragSession
+      ? new Set([this.childDragSession.childId])
+      : undefined;
     for (const containerId of this.containerIds()) {
-      syncLeafFootprintsFromCy(cy, model, containerId);
+      syncLeafFootprintsFromCy(cy, model, containerId, skipIds);
     }
   }
 
@@ -469,12 +473,12 @@ export class CompoundGraphScene {
     const model = this.ensureModelFromCy(cy);
     syncLeafFootprintsFromCy(cy, model, containerId);
     const zoom = cy.zoom();
-    const edgeClearance = zoom > 0 ? CHILD_EDGE_CLEARANCE_PX / zoom : COMPOUND_PADDING.left;
+    const edgeClearance = resolvedEdgeClearance(model, containerId, zoom);
     const parentNode = model.nodes.get(containerId);
     if (parentNode) {
       parentNode.reservedEdge = edgeClearance;
     }
-    const childrenBox = childrenFitBoxAbsoluteFromCy(cy, model, containerId);
+    const childrenBox = childrenFitBoxAbsolute(model, containerId);
     const outer = compositeOuterBox(model, containerId);
     if (!childrenBox || !outer) {
       return {
@@ -701,13 +705,16 @@ export class CompoundGraphScene {
       return;
     }
 
-    const nextModel = moveChild(session.startModel, childId, {
+    // Advance from the last legal rest, not from where the pointer went down - see
+    // GraphParentVertex.syncChildDragByDelta.
+    const nextModel = moveChild(this.model ?? session.startModel, childId, {
       x: session.startChildAbsolute.x + delta.x - session.parentAbsolute.x,
       y: session.startChildAbsolute.y + delta.y - session.parentAbsolute.y,
     });
     this.model = nextModel;
     if (this.model) {
       pinContainerToModel(cy, this.model, session.parentId);
+      pinLeafToModel(cy, this.model, childId);
     }
   }
 

@@ -5,6 +5,7 @@ import {
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
+  pinLeafToModel,
   renderedContainerBoxFromModel,
   restoreLeafVisibility,
   viewportBoundsInGraphSpace,
@@ -62,6 +63,30 @@ describe("compound-graph-core", () => {
       },
     );
     expect(() => applySubtreePositionsToCy(cy, model, "parent")).not.toThrow();
+  });
+
+  it("pinLeafToModel writes the model centre onto a leaf and skips missing ids", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        { data: { id: "parent", kind: "container", compoundWidth: 100, compoundHeight: 80 } },
+        { data: { id: "child", kind: "leaf" }, position: { x: 0, y: 0 } },
+      ],
+    });
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent" },
+      ],
+      {
+        parent: { x: 10, y: 20, w: 100, h: 80 },
+        child: { x: 5, y: 7 },
+      },
+    );
+    expect(() => pinLeafToModel(cy, model, "missing")).not.toThrow();
+    pinLeafToModel(cy, model, "child");
+    expect(cy.getElementById("child").position()).toEqual({ x: 15, y: 27 });
   });
 
   it("enableContainerDragging and restoreLeafVisibility skip missing elements", () => {

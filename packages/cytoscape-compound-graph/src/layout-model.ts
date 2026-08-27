@@ -1,4 +1,5 @@
 import {
+  CHILD_EDGE_CLEARANCE_PX,
   COMPOUND_MIN_HEIGHT,
   COMPOUND_MIN_WIDTH,
   COMPOUND_PADDING,
@@ -308,8 +309,38 @@ export function compositeOuterBox(model: WorkPackageLayoutModel, compositeId: st
   };
 }
 
+/** Negative clearance lets a child sit on the parent perimeter and then jump back. */
+function nonNegativeClearance(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 function compositeEdgeClearance(model: WorkPackageLayoutModel, compositeId: string): number {
-  return model.nodes.get(compositeId)?.reservedEdge ?? COMPOUND_PADDING.left;
+  const reserved = model.nodes.get(compositeId)?.reservedEdge;
+  if (typeof reserved === "number" && Number.isFinite(reserved)) {
+    return nonNegativeClearance(reserved);
+  }
+  return COMPOUND_PADDING.left;
+}
+
+/**
+ * Edge clearance for a live gesture: prefer a non-negative reserved edge already on the
+ * model (set from screen pixels via {@link GraphParentVertex.setEdgeClearance}), otherwise
+ * convert {@link CHILD_EDGE_CLEARANCE_PX} at the current zoom. Negative theme values are
+ * treated as 0 so a child cannot sit on — then jump back from — the parent perimeter.
+ */
+export function resolvedEdgeClearance(
+  model: WorkPackageLayoutModel,
+  compositeId: string,
+  zoom: number,
+): number {
+  const reserved = model.nodes.get(compositeId)?.reservedEdge;
+  if (typeof reserved === "number" && Number.isFinite(reserved)) {
+    return nonNegativeClearance(reserved);
+  }
+  if (zoom > 0) {
+    return nonNegativeClearance(CHILD_EDGE_CLEARANCE_PX) / zoom;
+  }
+  return COMPOUND_PADDING.left;
 }
 
 export function compositeInteriorBox(model: WorkPackageLayoutModel, compositeId: string): VisualBox | null {
@@ -407,7 +438,7 @@ function childFitBoxAbsolute(model: WorkPackageLayoutModel, childId: string): Vi
   };
 }
 
-function childrenFitBoxAbsolute(model: WorkPackageLayoutModel, compositeId: string): VisualBox | null {
+export function childrenFitBoxAbsolute(model: WorkPackageLayoutModel, compositeId: string): VisualBox | null {
   const childIds = model.childrenOf.get(compositeId) ?? [];
   if (childIds.length === 0) {
     return null;
@@ -482,11 +513,12 @@ export function parentOuterBoundsFromChildFit(
   childrenBox: VisualBox,
   edgeClearance: number,
 ): VisualBox {
+  const clearance = nonNegativeClearance(edgeClearance);
   return {
-    x1: childrenBox.x1 - edgeClearance,
-    y1: childrenBox.y1 - edgeClearance,
-    x2: childrenBox.x2 + edgeClearance,
-    y2: childrenBox.y2 + edgeClearance,
+    x1: childrenBox.x1 - clearance,
+    y1: childrenBox.y1 - clearance,
+    x2: childrenBox.x2 + clearance,
+    y2: childrenBox.y2 + clearance,
   };
 }
 
@@ -517,7 +549,8 @@ export function resizeCompoundBoxFromCorner(
   }
 
   let { x1, y1, x2, y2 } = startBox;
-  const { childrenBox, edgeClearance } = constraints;
+  const { childrenBox } = constraints;
+  const edgeClearance = nonNegativeClearance(constraints.edgeClearance);
 
   const movesEast = corner === "ne" || corner === "se";
   const movesWest = corner === "nw" || corner === "sw";
@@ -815,7 +848,7 @@ export function resizeComposite(
       looseEdges: ALL_LOOSE_EDGES,
     } satisfies ResizeChildConstraints);
   if (resolvedConstraints.edgeClearance !== undefined) {
-    node.reservedEdge = resolvedConstraints.edgeClearance;
+    node.reservedEdge = nonNegativeClearance(resolvedConstraints.edgeClearance);
   }
   const proposedOuter = resizeCompoundBoxFromCorner(
     startOuter,

@@ -3,6 +3,7 @@ import type { VisualBox } from "./collision";
 import {
   INITIAL_COMPOUND_SLACK,
   compoundSizeForContent,
+  measureLeafFootprint,
 } from "./cytoscape-utils";
 import {
   absoluteCenter,
@@ -93,11 +94,20 @@ export function measureContainerFromCy(cy: Core, containerId: string, childIds: 
         continue;
       }
       hasChild = true;
-      const box = child.boundingBox({ includeLabels: true, includeOverlays: false });
-      x1 = Math.min(x1, box.x1);
-      y1 = Math.min(y1, box.y1);
-      x2 = Math.max(x2, box.x2);
-      y2 = Math.max(y2, box.y2);
+      const center = child.position();
+      if (child.data("kind") === "leaf") {
+        const footprint = measureLeafFootprint(child);
+        x1 = Math.min(x1, center.x - footprint.halfW);
+        y1 = Math.min(y1, center.y - footprint.halfHTop);
+        x2 = Math.max(x2, center.x + footprint.halfW);
+        y2 = Math.max(y2, center.y + footprint.halfHBottom);
+      } else {
+        const box = child.boundingBox({ includeLabels: true, includeOverlays: false });
+        x1 = Math.min(x1, box.x1);
+        y1 = Math.min(y1, box.y1);
+        x2 = Math.max(x2, box.x2);
+        y2 = Math.max(y2, box.y2);
+      }
     }
     if (!hasChild) {
       return;
@@ -140,6 +150,19 @@ export function pinContainerToModel(
     cyParent.data("compoundHeight", parentSize.h);
     cyParent.position({ x: absolute.x, y: absolute.y });
   });
+}
+
+/** Writes a leaf's model centre onto its Cytoscape node, including while it is hidden mid-drag. */
+export function pinLeafToModel(
+  cy: Core,
+  model: WorkPackageLayoutModel,
+  leafId: string,
+): void {
+  const cyLeaf = cy.getElementById(leafId);
+  if (cyLeaf.empty()) {
+    return;
+  }
+  cyLeaf.position(absoluteCenter(model, leafId));
 }
 
 export function applySubtreePositionsToCy(

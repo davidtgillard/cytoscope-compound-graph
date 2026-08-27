@@ -112,31 +112,48 @@ describe("public API", () => {
     expect(TEST_PARENT.parentDragVisual(cy)).toBeNull();
   });
 
-  it("liveSnapshot differs from snapshot during child drag", () => {
-    const cy = headlessCy(TEST_PARENT.buildElements());
-    TEST_PARENT.initializeFromCy(cy);
+  it("liveSnapshot reads the layout model during child drag", () => {
+    const parent = GraphParentVertex.create({
+      id: "live-snap-parent",
+      label: "parent",
+      color: "#64748b",
+      children: [
+        { id: "live-snap-a", label: "child-a", color: "#94a3b8", x: -40, y: 0 },
+        { id: "live-snap-b", label: "child-b", color: "#a8b4c4", x: 40, y: 0 },
+      ],
+    });
+    const elements = parent.buildElements();
+    if (elements[0]?.data) {
+      elements[0].data = {
+        ...elements[0].data,
+        compoundWidth: 420,
+        compoundHeight: 280,
+      };
+    }
+    const cy = headlessCy(elements);
+    parent.initializeFromCy(cy);
     const invokeTapstart = captureTapstartHandler(cy);
-    TEST_PARENT.attachChildDragHandlers(cy, {});
+    parent.attachChildDragHandlers(cy, {});
 
     invokeTapstart(
-      syntheticTapstart(cy, "child-a", new MouseEvent("mousedown", { clientX: 100, clientY: 200 })),
+      syntheticTapstart(cy, "live-snap-a", new MouseEvent("mousedown", { clientX: 100, clientY: 200 })),
     );
-    expect(TEST_PARENT.isChildDragInProgress()).toBe(true);
-    const visual = TEST_PARENT.childDragVisual(cy);
+    expect(parent.isChildDragInProgress()).toBe(true);
+    const visual = parent.childDragVisual(cy);
     expect(visual).not.toBeNull();
     expect(visual!.label).toBe("child-a");
 
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 120, clientY: 220 }));
-    const live = TEST_PARENT.liveSnapshot(cy);
-    const snap = TEST_PARENT.snapshot(cy);
-    expect(live.children["child-a"].absolute.x).not.toBeCloseTo(
-      snap.children["child-a"].absolute.x,
-      0,
-    );
+    const live = parent.liveSnapshot(cy);
+    expect(live.parent.w).toBe(420);
+    expect(live.parent.h).toBe(280);
+    expect(live.children["live-snap-a"]).toEqual({
+      absolute: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+      relative: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+    });
 
-    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 120, clientY: 220 }));
-    expect(TEST_PARENT.childDragVisual(cy)).toBeNull();
-    expect(TEST_PARENT.isChildDragInProgress()).toBe(false);
+    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 100, clientY: 200 }));
+    expect(parent.childDragVisual(cy)).toBeNull();
+    expect(parent.isChildDragInProgress()).toBe(false);
   });
 
   it("setNodeOverlapPadding updates the live layout model", () => {

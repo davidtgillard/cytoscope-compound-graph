@@ -2,8 +2,6 @@ import type { Core, EventObject } from "cytoscape";
 import cytoscape from "cytoscape";
 import { applyLayoutModelToCy, layoutModelFromCy } from "./cytoscape-sync";
 import {
-  CHILD_EDGE_CLEARANCE_PX,
-  COMPOUND_PADDING,
   LEAF_LABEL_COLOR,
   LEAF_LABEL_FONT_FAMILY,
   LEAF_LABEL_FONT_SIZE,
@@ -24,13 +22,13 @@ import {
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
+  pinLeafToModel,
   renderedContainerBoxFromModel,
   restoreLeafVisibility,
   viewportBoundsInGraphSpace,
 } from "./compound-graph-core";
 import {
   compoundAbsolutePosition,
-  childrenFitBoxAbsoluteFromCy,
   snapshotGraphState,
   syncLeafFootprintsFromCy,
   type GraphSnapshot,
@@ -42,10 +40,12 @@ import {
 } from "./drag-listeners";
 import {
   absoluteCenter,
+  childrenFitBoxAbsolute,
   cloneLayoutModel,
   compositeOuterBox,
   moveComposite,
   moveChild,
+  resolvedEdgeClearance,
   resizeComposite,
   resizeLooseEdgesFromOuter,
   type LayoutModelBuildOptions,
@@ -253,7 +253,7 @@ export class GraphParentVertex {
   setEdgeClearance(modelUnits: number): void {
     const node = this.model?.nodes.get(this.id);
     if (node) {
-      node.reservedEdge = modelUnits;
+      node.reservedEdge = Number.isFinite(modelUnits) ? Math.max(0, modelUnits) : 0;
     }
   }
 
@@ -428,7 +428,10 @@ export class GraphParentVertex {
     if (!model) {
       return;
     }
-    syncLeafFootprintsFromCy(cy, model, this.id);
+    const skipIds = this.childDragSession
+      ? new Set([this.childDragSession.childId])
+      : undefined;
+    syncLeafFootprintsFromCy(cy, model, this.id, skipIds);
   }
 
   /** Computes frozen child-fit constraints for a resize gesture about to begin. */
@@ -436,12 +439,12 @@ export class GraphParentVertex {
     const model = this.ensureModelFromCy(cy);
     syncLeafFootprintsFromCy(cy, model, this.id);
     const zoom = cy.zoom();
-    const edgeClearance = zoom > 0 ? CHILD_EDGE_CLEARANCE_PX / zoom : COMPOUND_PADDING.left;
+    const edgeClearance = resolvedEdgeClearance(model, this.id, zoom);
     const parentNode = model.nodes.get(this.id);
     if (parentNode) {
       parentNode.reservedEdge = edgeClearance;
     }
-    const childrenBox = childrenFitBoxAbsoluteFromCy(cy, model, this.id);
+    const childrenBox = childrenFitBoxAbsolute(model, this.id);
     const outer = compositeOuterBox(model, this.id);
     if (!childrenBox || !outer) {
       return {
@@ -612,13 +615,18 @@ export class GraphParentVertex {
       return;
     }
 
-    const nextModel = moveChild(session.startModel, childId, {
+    // Advance from the last legal rest, not from where the pointer went down. Replaying
+    // every frame against `startModel` makes an illegal target throw the child all the
+    // way back to the grab point; using the live model stops it against the obstacle
+    // instead, the same way a container drag already resolves (see syncParentDragFromCy).
+    const nextModel = moveChild(this.model ?? session.startModel, childId, {
       x: session.startChildAbsolute.x + delta.x - session.parentAbsolute.x,
       y: session.startChildAbsolute.y + delta.y - session.parentAbsolute.y,
     });
     this.model = nextModel;
     if (this.model) {
       pinContainerToModel(cy, this.model, this.id);
+      pinLeafToModel(cy, this.model, childId);
     }
   }
 

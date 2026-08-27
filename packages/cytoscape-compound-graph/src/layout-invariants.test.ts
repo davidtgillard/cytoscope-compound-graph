@@ -29,6 +29,7 @@ import {
   ALL_LOOSE_EDGES,
   absoluteCenter,
   buildLayoutModel,
+  childrenFitBoxAbsolute,
   compositeInteriorBox,
   compositeOuterBox,
   flatLayoutFromModel,
@@ -50,6 +51,7 @@ interface Pose {
   relative: { x: number; y: number };
   absolute: { x: number; y: number };
   size: { w: number; h: number } | null;
+  footprint: { halfW: number; halfHTop: number; halfHBottom: number } | undefined;
 }
 
 function poses(model: WorkPackageLayoutModel): Map<string, Pose> {
@@ -59,6 +61,7 @@ function poses(model: WorkPackageLayoutModel): Map<string, Pose> {
       relative: { ...node.center },
       absolute: absoluteCenter(model, id),
       size: node.size ? { ...node.size } : null,
+      footprint: node.footprint ? { ...node.footprint } : undefined,
     });
   }
   return result;
@@ -137,6 +140,10 @@ function expectExtentChangeOnly(
     expect({ id, size: afterPoses.get(id)!.size }).toEqual({
       id,
       size: beforePoses.get(id)!.size,
+    });
+    expect({ id, footprint: afterPoses.get(id)!.footprint }).toEqual({
+      id,
+      footprint: beforePoses.get(id)!.footprint,
     });
   }
 }
@@ -400,6 +407,46 @@ describe("positional requirements", () => {
       });
       expectExtentChangeOnly(before, after, "left");
     });
+
+    it("holds child size when a parent shrinks toward a large label", () => {
+      const largeLabel = { halfW: 70, halfHTop: 18, halfHBottom: 80 };
+      const before = buildLayoutModel(
+        [
+          { id: "parent", isCompound: true },
+          { id: "child", parent: "parent", footprint: largeLabel },
+        ],
+        {
+          parent: { x: 0, y: 0, w: 400, h: 300 },
+          child: { x: 80, y: 40 },
+        },
+      );
+      before.nodes.get("parent")!.reservedEdge = 2;
+      const childrenBox = childrenFitBoxAbsolute(before, "parent");
+      const after = resizeComposite(before, "parent", "se", -1000, -1000, {
+        childrenBox,
+        edgeClearance: 2,
+        looseEdges: ALL_LOOSE_EDGES,
+      });
+      expectExtentChangeOnly(before, after, "parent");
+      expect(after.nodes.get("child")!.footprint).toEqual(largeLabel);
+      expect(after.nodes.get("child")!.size ?? null).toEqual(before.nodes.get("child")!.size ?? null);
+      const outer = compositeOuterBox(after, "parent")!;
+      const childBox = childFitBoxOf(after, "child");
+      expect(outer.x2).toBeGreaterThanOrEqual(childBox.x2 + 2 - 1e-6);
+      expect(outer.y2).toBeGreaterThanOrEqual(childBox.y2 + 2 - 1e-6);
+    });
+
+    it("holds a nested container's size when its parent shrinks toward it", () => {
+      const before = nestedScenario();
+      const nestedSize = before.nodes.get("mid")!.size;
+      const after = resizeComposite(before, "right", "se", -200, -200, {
+        childrenBox: childrenFitBoxAbsolute(before, "right"),
+        edgeClearance: 8,
+        looseEdges: ALL_LOOSE_EDGES,
+      });
+      expectExtentChangeOnly(before, after, "right");
+      expect(after.nodes.get("mid")!.size).toEqual(nestedSize);
+    });
   });
 
   /**
@@ -499,6 +546,74 @@ describe("positional requirements", () => {
         }).toEqual({ target, inside: true });
         expectNoForbiddenOverlap(after, "left");
       }
+    });
+
+    it("does not throw a leaf back to the grab point after a later frame collides", () => {
+      // Replaying every frame from the grab pose makes this fail: the first move is a
+      // legal lift, then the colliding drop is resolved from the origin, so the leaf
+      // loses the lift and jumps back toward where it started. Advancing from the last
+      // rest keeps the lift and stops against the sibling instead.
+      const before = nestedScenario();
+      const start = absoluteCenter(before, "left-a");
+      const lifted = moveChild(before, "left-a", { x: 40, y: -80 });
+      expect(absoluteCenter(lifted, "left-a").y).toBeLessThan(start.y - 40);
+
+      const after = moveChild(lifted, "left-a", { x: 90, y: -30 });
+      const landed = absoluteCenter(after, "left-a");
+      expectNoForbiddenOverlap(after, "left-a");
+      expect(
+        boxIsInside(childFitBoxOf(after, "left-a"), compositeInteriorBox(after, "left")!),
+      ).toBe(true);
+      expect(landed.y).toBeLessThan(start.y - 40);
+    });
+
+    it("clamps a tall label against the parent floor without returning to the grab point", () => {
+      const tallLabel = { halfW: 18, halfHTop: 18, halfHBottom: 70 };
+      const model = buildLayoutModel(
+        [
+          { id: "parent", isCompound: true },
+          { id: "child", parent: "parent", footprint: tallLabel },
+        ],
+        {
+          parent: { x: 0, y: 0, w: 300, h: 200 },
+          child: { x: 0, y: 0 },
+        },
+      );
+      const start = absoluteCenter(model, "child");
+      const interior = compositeInteriorBox(model, "parent")!;
+      const nudged = moveChild(model, "child", { x: 0, y: 10 });
+      expect(absoluteCenter(nudged, "child").y).toBeGreaterThan(start.y);
+
+      const after = moveChild(nudged, "child", { x: 0, y: 500 });
+      const box = childFitBoxOf(after, "child");
+      expect(box.y2).toBeLessThanOrEqual(interior.y2 + 1e-6);
+      expect(absoluteCenter(after, "child").y).toBeGreaterThan(start.y);
+    });
+
+    it("stops a wide label against a sibling without returning to the grab point", () => {
+      const wideLabel = { halfW: 50, halfHTop: 18, halfHBottom: 50 };
+      const model = buildLayoutModel(
+        [
+          { id: "parent", isCompound: true },
+          { id: "a", parent: "parent", footprint: wideLabel },
+          { id: "b", parent: "parent", footprint: wideLabel },
+        ],
+        {
+          parent: { x: 0, y: 0, w: 400, h: 300 },
+          a: { x: -80, y: 0 },
+          b: { x: 80, y: 0 },
+        },
+      );
+      const start = absoluteCenter(model, "a");
+      const nudged = moveChild(model, "a", { x: -60, y: 0 });
+      expect(absoluteCenter(nudged, "a").x).toBeGreaterThan(start.x);
+
+      const after = moveChild(nudged, "a", { x: 80, y: 0 });
+      expectNoForbiddenOverlap(after, "a");
+      expect(absoluteCenter(after, "a").x).toBeGreaterThan(start.x);
+      expect(
+        boxIsInside(childFitBoxOf(after, "a"), compositeInteriorBox(after, "parent")!),
+      ).toBe(true);
     });
 
     it("prefers clearing an obstacle over reaching the viewport edge", () => {

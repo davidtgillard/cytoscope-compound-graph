@@ -377,6 +377,14 @@ describe("CompoundGraphScene", () => {
     expect(scene.getModel()?.nodeOverlapPadding).toBe(6);
   });
 
+  it("setEdgeClearance rejects a negative value so children cannot sit on the perimeter", () => {
+    const scene = singleCompoundWithLeaves();
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    scene.setEdgeClearance(-5);
+    expect(scene.getModel()?.nodes.get("parent")?.reservedEdge).toBe(0);
+  });
+
   it("refreshFootprintsFromCy syncs leaf footprints for all containers", () => {
     const scene = nestedCompoundScene();
     const cy = headlessCy(scene.buildElements());

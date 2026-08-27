@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A child drag that hits a sibling or the container wall now stops at the last legal position instead of jumping back to where the node was grabbed. Child drag resolves the same way a container drag already does: one frame at a time from the last rest pose, so the node cannot occupy an invalid position.
+- Child-drag collision keeps using the label-inclusive footprint measured at pointer-down. The hidden Cytoscape node is pinned to the live model each frame so a later re-measure cannot drop the label and replay the gesture from the grab point.
+- Leaf footprints include the CSS line-box of the label (em-box and `text-outline`), not just glyph ink, so a child cannot be dragged onto the parent perimeter and then jump back.
+- Compound edge clearance is never negative. Shrinking a parent toward a child stops at the child's line-box plus clearance, so a resize cannot change a child's size by covering it.
+
 ## 0.2.0
 
 Package renamed from `@dgillard/nested-cytoscope-vertex` to `@dgillard/cytoscape-compound-graph`.

@@ -210,6 +210,35 @@ describe("cytoscape-utils", () => {
     expect(footprint.halfHBottom).toBeGreaterThan(0);
   });
 
+  it("measureLeafFootprint includes the label outline and line-box", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        {
+          data: {
+            id: "leaf",
+            kind: "leaf",
+            label: "a longish label",
+            nodeWidth: 36,
+            nodeHeight: 36,
+            labelFontSize: 11,
+            labelOutlineWidth: 2,
+            labelMarginY: 6,
+            labelMaxWidth: 120,
+          },
+        },
+      ],
+    });
+    const node = cy.getElementById("leaf");
+    node.position({ x: 0, y: 0 });
+    const footprint = measureLeafFootprint(node);
+    expect(footprint.halfHTop).toBeGreaterThanOrEqual(18);
+    expect(footprint.halfHBottom).toBeGreaterThanOrEqual(18 + 6 + 11 + 2);
+    expect(footprint.halfW).toBeGreaterThanOrEqual(18 + 2);
+    expect(footprint.halfW).toBeLessThanOrEqual(120 / 2 + 2);
+  });
+
   it("measureAndPinCompound and applyFrozenCompoundSize keep anchors stable", () => {
     const cy = cytoscape({
       headless: true,
@@ -266,7 +295,7 @@ describe("cytoscape-utils", () => {
       { id: "child", parent: "parent" },
     ];
     let model = layoutModelFromCy(cy, inputs);
-    const reservedEdge = -2;
+    const reservedEdge = 2;
     model.nodes.get("parent")!.reservedEdge = reservedEdge;
     applyLayoutModelToCy(cy, model);
 
@@ -281,6 +310,7 @@ describe("cytoscape-utils", () => {
     const outer = compositeOuterBox(model, "parent")!;
 
     expect(outer.x2).toBeCloseTo(childrenBox!.x2 + reservedEdge, 2);
+    expect(outer.x2).toBeGreaterThanOrEqual(childrenBox!.x2 - 1e-6);
   });
 
   it("SE shrink on sized demo parent only moves dragged east and south edges", () => {
@@ -305,7 +335,7 @@ describe("cytoscape-utils", () => {
     });
 
     DEMO_COMPOUND.initializeFromCy(cy);
-    const reservedEdge = -2;
+    const reservedEdge = 2;
     DEMO_COMPOUND.setEdgeClearance(reservedEdge);
 
     const model = DEMO_COMPOUND.getModel()!;

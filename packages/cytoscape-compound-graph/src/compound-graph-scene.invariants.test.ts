@@ -20,7 +20,7 @@
 import { describe, expect, it } from "vitest";
 import cytoscape from "cytoscape";
 import { CompoundGraphScene, type CompoundGraphSceneSpec } from "./compound-graph-scene";
-import { ALL_LOOSE_EDGES, absoluteCenter, buildLayoutModel } from "./layout-model";
+import { ALL_LOOSE_EDGES, absoluteCenter, buildLayoutModel, childrenFitBoxAbsolute, compositeOuterBox, moveChild } from "./layout-model";
 import { captureTapstartHandler, headlessCy, syntheticTapstart } from "../tests/helpers/fixtures";
 
 interface RenderedNode {
@@ -113,21 +113,23 @@ function dragContainer(
   scene.applyContainerDragFromCy(cy, containerId);
 }
 
-/** Drives a full detached leaf drag through the public tapstart/mousemove/mouseup path. */
+/** Drives a detached leaf drag through the public tapstart/mousemove/mouseup path. */
 function dragLeaf(
   scene: CompoundGraphScene,
   cy: cytoscape.Core,
   leafId: string,
-  delta: { x: number; y: number },
+  ...deltas: { x: number; y: number }[]
 ): void {
   const invokeTapstart = captureTapstartHandler(cy);
   const detach = scene.attachChildDragHandlers(cy, {});
   invokeTapstart(
     syntheticTapstart(cy, leafId, new MouseEvent("mousedown", { clientX: 0, clientY: 0 })),
   );
-  window.dispatchEvent(
-    new MouseEvent("mousemove", { clientX: delta.x * cy.zoom(), clientY: delta.y * cy.zoom() }),
-  );
+  for (const delta of deltas) {
+    window.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: delta.x * cy.zoom(), clientY: delta.y * cy.zoom() }),
+    );
+  }
   window.dispatchEvent(new MouseEvent("mouseup", { clientX: 0, clientY: 0 }));
   detach();
 }
@@ -172,6 +174,26 @@ describe("CompoundGraphScene positional requirements", () => {
 
     expect(after.get("left-a")!.position).toEqual({ x: 930, y: 500 });
     expectUnchanged(before, after, ["left", "left-b", "right", "mid", "mid-a"]);
+  });
+
+  it("R1: a later colliding frame does not throw a leaf back to the grab point", () => {
+    const { scene, cy } = initializedScene();
+    const startModel = scene.cloneModel();
+    const startRelative = startModel.nodes.get("left-a")!.center;
+    const liftRelative = { x: startRelative.x, y: startRelative.y - 80 };
+    const dropRelative = { x: startRelative.x + 180, y: startRelative.y };
+
+    dragLeaf(scene, cy, "left-a", { x: 0, y: -80 }, { x: 180, y: 0 });
+
+    const landed = absoluteCenter(scene.cloneModel(), "left-a");
+    const sequential = absoluteCenter(
+      moveChild(moveChild(startModel, "left-a", liftRelative), "left-a", dropRelative),
+      "left-a",
+    );
+    const replayedFromGrab = absoluteCenter(moveChild(startModel, "left-a", dropRelative), "left-a");
+
+    expect(landed).toEqual(sequential);
+    expect(landed).not.toEqual(replayedFromGrab);
   });
 
   it("R1: dragging a leaf inside a nested container moves only that leaf", () => {
@@ -241,6 +263,55 @@ describe("CompoundGraphScene positional requirements", () => {
 
     expect(after.get("mid")!.size).toEqual({ w: 270, h: 220 });
     expectUnchanged(before, after, ["left", "left-a", "left-b", "right", "mid-a"]);
+  });
+
+  it("R4: shrinking a parent toward a labelled child does not change the child's size", () => {
+    const spec: CompoundGraphSceneSpec = {
+      nodes: [
+        {
+          id: "parent",
+          label: "parent",
+          color: "#000",
+          kind: "container",
+          x: 0,
+          y: 0,
+          compoundWidth: 400,
+          compoundHeight: 300,
+        },
+        {
+          id: "child",
+          label: "a wide labelled child",
+          color: "#111",
+          kind: "leaf",
+          parent: "parent",
+          x: 80,
+          y: 40,
+        },
+      ],
+      edges: [],
+      clampParentToViewport: false,
+    };
+    const { scene, cy } = initializedScene(spec);
+    const child = cy.getElementById("child");
+    const beforePosition = { ...child.position() };
+    const beforeSize = {
+      w: child.data("nodeWidth"),
+      h: child.data("nodeHeight"),
+    };
+
+    const constraints = scene.computeResizeChildConstraints(cy, "parent");
+    scene.resizeFromCorner("parent", "se", -1000, -1000, scene.cloneModel(), constraints);
+    scene.syncToCy(cy);
+
+    expect(child.position()).toEqual(beforePosition);
+    expect(child.data("nodeWidth")).toBe(beforeSize.w);
+    expect(child.data("nodeHeight")).toBe(beforeSize.h);
+
+    const model = scene.getModel()!;
+    const outer = compositeOuterBox(model, "parent")!;
+    const childrenBox = childrenFitBoxAbsolute(model, "parent")!;
+    expect(outer.x2).toBeGreaterThanOrEqual(childrenBox.x2 - 1e-6);
+    expect(outer.y2).toBeGreaterThanOrEqual(childrenBox.y2 - 1e-6);
   });
 
   /**

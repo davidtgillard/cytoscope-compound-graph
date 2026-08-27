@@ -32,13 +32,19 @@ export function graphNodeModelPosition(node: NodeSingular): Point {
   return node.position();
 }
 
+function styleNumber(node: NodeSingular, key: string): number {
+  const value = Number(node.data(key));
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 /**
  * Measures a leaf's true rendered footprint relative to its own center, using
- * Cytoscape's own label metrics (`boundingBox({ includeLabels })`) rather than a
- * guessed constant. `text-valign: bottom` means the label hangs below the shape and can
- * be wider than it, so the shape-only box gives the top extent (nothing renders above
- * center) while the label-inclusive box gives the bottom/width extent. This works even
- * while the node is hidden mid-drag (opacity 0), since boundingBox is geometry-based.
+ * Cytoscape's own label metrics (`boundingBox({ includeLabels })`) plus the line-box of
+ * the label. `text-valign: bottom` means the label hangs below the shape and can be
+ * wider than it. Cytoscape's label box is glyph ink, so a line of text still occupies
+ * its em-box and `text-outline` extends beyond the ink; both are added here so a child
+ * cannot sit on the parent perimeter and then jump back when the line-box is painted.
+ * `labelMaxWidth` is only a cap, matching CSS `max-width` wrapping.
  */
 /** @internal */
 export function measureLeafFootprint(node: NodeSingular): {
@@ -49,10 +55,23 @@ export function measureLeafFootprint(node: NodeSingular): {
   const center = node.position();
   const shapeBox = node.boundingBox({ includeLabels: false, includeOverlays: false });
   const fullBox = node.boundingBox({ includeLabels: true, includeOverlays: false });
+  const outline = styleNumber(node, "labelOutlineWidth");
+  const fontSize = styleNumber(node, "labelFontSize");
+  const marginY = styleNumber(node, "labelMarginY");
+  const nodeHeight = styleNumber(node, "nodeHeight");
+  const maxWidth = styleNumber(node, "labelMaxWidth");
+  const halfHTop = Math.max(center.y - shapeBox.y1, nodeHeight > 0 ? nodeHeight / 2 : 0);
+  const inkHalfW = Math.max(center.x - fullBox.x1, fullBox.x2 - center.x, halfHTop);
+  const inkBottom = fullBox.y2 - center.y;
+  const lineBoxBottom = halfHTop + marginY + fontSize + outline;
+  let halfW = inkHalfW + outline;
+  if (maxWidth > 0) {
+    halfW = Math.min(halfW, maxWidth / 2 + outline);
+  }
   return {
-    halfW: Math.max(center.x - fullBox.x1, fullBox.x2 - center.x),
-    halfHTop: center.y - shapeBox.y1,
-    halfHBottom: fullBox.y2 - center.y,
+    halfW,
+    halfHTop,
+    halfHBottom: Math.max(inkBottom + outline, lineBoxBottom),
   };
 }
 
@@ -62,8 +81,12 @@ export function syncLeafFootprintsFromCy(
   cy: Core,
   model: WorkPackageLayoutModel,
   parentId: string,
+  skipIds?: ReadonlySet<string>,
 ): void {
   for (const childId of model.childrenOf.get(parentId) ?? []) {
+    if (skipIds?.has(childId)) {
+      continue;
+    }
     const layoutNode = model.nodes.get(childId);
     const cyNode = cy.getElementById(childId);
     if (!layoutNode || layoutNode.isCompound || cyNode.empty()) {

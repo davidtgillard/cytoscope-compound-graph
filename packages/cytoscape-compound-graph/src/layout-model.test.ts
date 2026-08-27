@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_LOOSE_EDGES,
-  NODE_OVERLAP_PADDING,
   absoluteCenter,
   buildLayoutModel,
   canOverlap,
@@ -21,7 +20,7 @@ import {
   subtreeNodeIds,
   visualBox,
 } from "./layout-model";
-import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
+import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH } from "./cytoscape-theme";
 
 describe("layout-model utilities", () => {
   const inputs = [
@@ -520,9 +519,8 @@ describe("layout-model move and resize branches", () => {
     expect(nodesOverlapInModel(resized, "left", "right")).toBe(false);
   });
 
-  it("SE shrink uses reservedEdge clearance matching child drag bounds", () => {
+  it("SE shrink treats a negative reservedEdge as zero so the parent cannot cover a child", () => {
     const footprint = { halfW: 18, halfHTop: 18, halfHBottom: 26 };
-    const reservedEdge = -2;
     const inputs = [
       { id: "parent", isCompound: true },
       { id: "child", parent: "parent", footprint },
@@ -531,26 +529,25 @@ describe("layout-model move and resize branches", () => {
       parent: { x: 0, y: 0, w: 200, h: 200 },
       child: { x: 50, y: 30 },
     });
-    model.nodes.get("parent")!.reservedEdge = reservedEdge;
+    model.nodes.get("parent")!.reservedEdge = -2;
 
     const childFitRight = 50 + footprint.halfW;
-    const expectedMinRight = childFitRight + reservedEdge;
-    const legacyMinRight = childFitRight + NODE_OVERLAP_PADDING + COMPOUND_PADDING.right;
+    const childrenBox = {
+      x1: 50 - footprint.halfW,
+      y1: 30 - footprint.halfHTop,
+      x2: 50 + footprint.halfW,
+      y2: 30 + footprint.halfHBottom,
+    };
 
     model = resizeComposite(model, "parent", "se", -1000, 0, {
-      childrenBox: {
-        x1: 50 - footprint.halfW,
-        y1: 30 - footprint.halfHTop,
-        x2: 50 + footprint.halfW,
-        y2: 30 + footprint.halfHBottom,
-      },
-      edgeClearance: reservedEdge,
+      childrenBox,
+      edgeClearance: -2,
       looseEdges: ALL_LOOSE_EDGES,
     });
     const outer = compositeOuterBox(model, "parent")!;
 
-    expect(outer.x2).toBeCloseTo(expectedMinRight, 3);
-    expect(outer.x2).toBeLessThan(legacyMinRight);
+    expect(outer.x2).toBeCloseTo(childFitRight, 3);
+    expect(outer.x2).toBeGreaterThanOrEqual(childFitRight - 1e-6);
   });
 
   it("SE drag keeps the opposite NW corner fixed", () => {
