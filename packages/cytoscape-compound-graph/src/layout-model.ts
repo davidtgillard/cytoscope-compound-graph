@@ -680,10 +680,41 @@ function applyCompositeOuterBox(
   }
 }
 
+/** @internal */
+export interface GrowCompositeToFitOptions {
+  /**
+   * Extra model-unit inset beyond edge clearance. Load-time unjam passes the probe
+   * step so children that sit flush with the interior can still take a drag step.
+   */
+  slack?: number;
+}
+
+function floorOuterToCompoundMinimum(box: VisualBox): VisualBox {
+  let { x1, y1, x2, y2 } = box;
+  const width = x2 - x1;
+  const height = y2 - y1;
+  if (width < COMPOUND_MIN_WIDTH) {
+    const pad = (COMPOUND_MIN_WIDTH - width) / 2;
+    x1 -= pad;
+    x2 += pad;
+  }
+  if (height < COMPOUND_MIN_HEIGHT) {
+    const pad = (COMPOUND_MIN_HEIGHT - height) / 2;
+    y1 -= pad;
+    y2 += pad;
+  }
+  return { x1, y1, x2, y2 };
+}
+
 /**
  * Grows `compositeId`'s outer box just far enough to contain all of its direct children
- * with edge clearance, never shrinking it, holding every descendant's absolute center
- * constant. Returns true when the box actually changed.
+ * with edge clearance (plus optional slack), never shrinking it, holding every
+ * descendant's absolute center constant. Returns true when the box actually changed.
+ *
+ * Expands the current outer per-edge to cover the child-fit box, then floors the merged
+ * size at {@link COMPOUND_MIN_WIDTH}/{@link COMPOUND_MIN_HEIGHT}. Does not re-center a
+ * minimum-size box on the children — that is the shrink floor used by live resize
+ * ({@link minimumCompositeOuterBox}), and unioning it here over-expands off-centre fits.
  *
  * Used by load-time unjam (see layout-unjam.ts) to make room for nodes it has separated;
  * live resize goes through {@link resizeComposite} instead.
@@ -692,20 +723,33 @@ function applyCompositeOuterBox(
 export function growCompositeToFitChildren(
   model: WorkPackageLayoutModel,
   compositeId: string,
+  options?: GrowCompositeToFitOptions,
 ): boolean {
   const node = model.nodes.get(compositeId);
   const currentOuter = compositeOuterBox(model, compositeId);
-  const minimumOuter = minimumCompositeOuterBox(model, compositeId);
-  if (!node?.isCompound || !node.size || !currentOuter || !minimumOuter) {
+  if (!node?.isCompound || !node.size || !currentOuter) {
     return false;
   }
 
-  const merged: VisualBox = {
-    x1: Math.min(currentOuter.x1, minimumOuter.x1),
-    y1: Math.min(currentOuter.y1, minimumOuter.y1),
-    x2: Math.max(currentOuter.x2, minimumOuter.x2),
-    y2: Math.max(currentOuter.y2, minimumOuter.y2),
-  };
+  const rawSlack = options?.slack;
+  const slack =
+    typeof rawSlack === "number" && Number.isFinite(rawSlack) ? Math.max(0, rawSlack) : 0;
+  const childrenBox = childrenFitBoxAbsolute(model, compositeId);
+  let merged: VisualBox;
+  if (!childrenBox) {
+    merged = floorOuterToCompoundMinimum(currentOuter);
+  } else {
+    const fitOuter = parentOuterBoundsFromChildFit(
+      childrenBox,
+      compositeEdgeClearance(model, compositeId) + slack,
+    );
+    merged = floorOuterToCompoundMinimum({
+      x1: Math.min(currentOuter.x1, fitOuter.x1),
+      y1: Math.min(currentOuter.y1, fitOuter.y1),
+      x2: Math.max(currentOuter.x2, fitOuter.x2),
+      y2: Math.max(currentOuter.y2, fitOuter.y2),
+    });
+  }
   if (boxesEqual(currentOuter, merged)) {
     return false;
   }

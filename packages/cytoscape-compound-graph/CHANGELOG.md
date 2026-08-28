@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Load-time unjam grows a parent only to the child-fit plus edge clearance and a 1px drag slack, instead of recentering a minimum-size box on the children or parking jammed nodes on a distant fallback.
 - A child drag that hits a sibling or the container wall now stops at the last legal position instead of jumping back to where the node was grabbed. Child drag resolves the same way a container drag already does: one frame at a time from the last rest pose, so the node cannot occupy an invalid position.
 - Child-drag collision keeps using the label-inclusive footprint measured at pointer-down. The hidden Cytoscape node is pinned to the live model each frame so a later re-measure cannot drop the label and replay the gesture from the grab point.
 - Leaf footprints include the CSS line-box of the label (em-box and `text-outline`), not just glyph ink, so a child cannot be dragged onto the parent perimeter and then jump back.

@@ -364,9 +364,8 @@ describe("positional requirements", () => {
 
     it("holds when load-time unjam enlarges an undersized container", () => {
       // The child is already a valid, unobstructed rest, so unjam relocates nothing. The
-      // container is merely below the compound minimum size with its child off-centre, so
-      // the grow pass has to enlarge it asymmetrically - which shifts the container's
-      // centre, and every relative offset underneath it. The child must not ride along.
+      // container is merely below the compound minimum height, so the grow pass enlarges
+      // height to COMPOUND_MIN_HEIGHT without widening around the off-centre child.
       const before = buildLayoutModel(
         [
           { id: "root", isCompound: true },
@@ -380,8 +379,8 @@ describe("positional requirements", () => {
       const { model: after, changed } = unjamLayoutModel(before);
 
       expect(changed).toBe(true);
-      expect(after.nodes.get("root")!.size).toEqual({ w: 120, h: 80 });
-      expect(absoluteCenter(after, "root")).toEqual({ x: 510, y: 300 });
+      expect(after.nodes.get("root")!.size).toEqual({ w: 100, h: 80 });
+      expect(absoluteCenter(after, "root")).toEqual({ x: 500, y: 300 });
       expectExtentChangeOnly(before, after, "root");
     });
 

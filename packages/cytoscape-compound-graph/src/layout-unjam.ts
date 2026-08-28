@@ -301,8 +301,22 @@ function defaultRingStep(model: WorkPackageLayoutModel, nodeId: string): number 
     return DEFAULT_RING_STEP;
   }
   /* v8 ignore stop */
+  // `visualBox` already includes nodeOverlapPadding on every side, so `span` is the
+  // axis-aligned distance that separates two identical stacked footprints.
   const span = Math.max(box.x2 - box.x1, box.y2 - box.y1);
-  return span + model.nodeOverlapPadding + 4;
+  return span + EPSILON;
+}
+
+function unjamGrowSlack(options: UnjamLayoutOptions): number {
+  return options.probeTau ?? DEFAULT_PROBE_TAU;
+}
+
+function growParentForUnjam(
+  model: WorkPackageLayoutModel,
+  parentId: string,
+  options: UnjamLayoutOptions,
+): boolean {
+  return growCompositeToFitChildren(model, parentId, { slack: unjamGrowSlack(options) });
 }
 
 function collectSiblingGroups(model: WorkPackageLayoutModel): SiblingGroup[] {
@@ -351,6 +365,10 @@ function parkAt(model: WorkPackageLayoutModel, nodeId: string, absolute: Point):
  * Sweeps candidate absolute positions on rings around `startAbsolute`, leaving `nodeId`
  * parked on whichever candidate it visited last.
  *
+ * `placed` is the nearest valid rest (inside the parent, obstacle-free). Local freedom is
+ * not required here: a flush fit is still a rest, and the caller grows a 1px slack rather
+ * than walking further rings.
+ *
  * `roomNeeded` is the first candidate that cleared every obstacle but did not fit inside
  * the container's interior - the deliberate place to grow the container towards when no
  * ring yields a valid rest, rather than growing towards wherever probing happened to end.
@@ -374,7 +392,7 @@ function sweepRings(
         y: startAbsolute.y + Math.sin(angle) * ringStep * ring,
       };
       parkAt(model, nodeId, candidate);
-      if (isValidRest(model, nodeId) && isLocallyFree(model, nodeId, options)) {
+      if (isValidRest(model, nodeId)) {
         return { placed: candidate, roomNeeded: null };
       }
       if (!roomNeeded && clearsObstacles(model, nodeId)) {
@@ -386,6 +404,21 @@ function sweepRings(
   return { placed: null, roomNeeded };
 }
 
+function keepPlacedRest(
+  model: WorkPackageLayoutModel,
+  nodeId: string,
+  placed: Point,
+  parentId: string | undefined,
+  options: UnjamLayoutOptions,
+  grew: boolean,
+): { placed: Point; grew: boolean } {
+  parkAt(model, nodeId, placed);
+  if (parentId && !isLocallyFree(model, nodeId, options) && growParentForUnjam(model, parentId, options)) {
+    return { placed, grew: true };
+  }
+  return { placed, grew };
+}
+
 function tryRingSearchPlacement(
   model: WorkPackageLayoutModel,
   nodeId: string,
@@ -394,22 +427,34 @@ function tryRingSearchPlacement(
 ): { placed: Point | null; grew: boolean } {
   const parentId = model.parentOf.get(nodeId);
   let grew = false;
+  let lastRoomNeeded: Point | null = null;
 
   for (let growAttempt = 0; growAttempt < MAX_GROW_ATTEMPTS; growAttempt++) {
     const sweep = sweepRings(model, nodeId, startAbsolute, options);
     if (sweep.placed) {
-      return { placed: sweep.placed, grew };
+      return keepPlacedRest(model, nodeId, sweep.placed, parentId, options, grew);
     }
     if (!parentId || !sweep.roomNeeded) {
       break;
     }
-    // Park on the obstacle-free candidate so the container grows towards it, then
-    // re-sweep: the enlarged interior usually admits that candidate outright.
+    lastRoomNeeded = sweep.roomNeeded;
     parkAt(model, nodeId, sweep.roomNeeded);
-    if (!growCompositeToFitChildren(model, parentId)) {
+    if (!growParentForUnjam(model, parentId, options)) {
       break;
     }
     grew = true;
+  }
+
+  // An obstacle-free candidate away from the start is a better park than the diagonal
+  // fallback, even if further grow attempts did not admit a ring rest. The start itself
+  // is not a placement: it is the jammed pose, and the caller still needs the last-resort
+  // offset (e.g. a parent with no size, so grow cannot create an interior).
+  if (lastRoomNeeded && !centersEqual(lastRoomNeeded, startAbsolute)) {
+    parkAt(model, nodeId, lastRoomNeeded);
+    if (parentId && growParentForUnjam(model, parentId, options)) {
+      grew = true;
+    }
+    return { placed: lastRoomNeeded, grew };
   }
 
   // Probing must not leave the node parked on a rejected candidate; the caller's fallback
@@ -441,7 +486,8 @@ function tryPlaceNode(
     return grew || !centersEqual(startAbsolute, placed);
   }
 
-  // Last resort: deterministic offset so deeply nested stacks still separate.
+  // Last resort: deterministic offset so deeply nested stacks still separate. Only used
+  // when no obstacle-free candidate existed at all.
   const ringStep = options.ringStep ?? defaultRingStep(model, nodeId);
   const fallback = {
     x: startAbsolute.x + ringStep * (sortedIndex + 1),
@@ -449,7 +495,7 @@ function tryPlaceNode(
   };
   parkAt(model, nodeId, fallback);
   const parentId = model.parentOf.get(nodeId);
-  const grewForFallback = parentId ? growCompositeToFitChildren(model, parentId) : false;
+  const grewForFallback = parentId ? growParentForUnjam(model, parentId, options) : false;
   return grew || grewForFallback || !centersEqual(startAbsolute, fallback);
 }
 
@@ -472,7 +518,7 @@ export function unjamLayoutModel(
       }
     }
 
-    if (group.parentId && growCompositeToFitChildren(next, group.parentId)) {
+    if (group.parentId && growParentForUnjam(next, group.parentId, options)) {
       changed = true;
     }
   }

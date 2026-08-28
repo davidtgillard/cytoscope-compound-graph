@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildLayoutModel,
+  childrenFitBoxAbsolute,
+  compositeOuterBox,
   flatLayoutFromModel,
   nodesOverlapInModel,
+  parentOuterBoundsFromChildFit,
 } from "./layout-model";
 import * as layoutModel from "./layout-model";
 import {
@@ -11,6 +14,7 @@ import {
   isValidRest,
   unjamLayoutModel,
 } from "./layout-unjam";
+import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
 
 describe("layout-unjam", () => {
   // Models the post-clone stacked layout: siblings share (0, 0) and drag feels frozen.
@@ -200,6 +204,110 @@ describe("layout-unjam", () => {
     const afterOuter = unjammed.nodes.get("root")!.size!;
     expect(afterOuter.w * afterOuter.h).toBeGreaterThanOrEqual(beforeOuter.w * beforeOuter.h);
     expect(nodesOverlapInModel(unjammed, "a", "b")).toBe(false);
+  });
+
+  it("grows a tight parent only as far as the separated children plus a probe slack", () => {
+    const tightParentInputs = [
+      { id: "root", isCompound: true },
+      { id: "a", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+      { id: "b", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+      { id: "c", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+    ];
+    const tightLayout = {
+      root: { x: 0, y: 0, w: 90, h: 90 },
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 0 },
+      c: { x: 0, y: 0 },
+    };
+    const model = buildLayoutModel(tightParentInputs, tightLayout);
+    const beforeOuter = compositeOuterBox(model, "root")!;
+    const { model: unjammed, changed } = unjamLayoutModel(model, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(nodesOverlapInModel(unjammed, "a", "b")).toBe(false);
+    expect(nodesOverlapInModel(unjammed, "b", "c")).toBe(false);
+    expect(isValidRest(unjammed, "a")).toBe(true);
+    expect(isValidRest(unjammed, "b")).toBe(true);
+    expect(isValidRest(unjammed, "c")).toBe(true);
+    expect(isLocallyFree(unjammed, "a")).toBe(true);
+    expect(isLocallyFree(unjammed, "b")).toBe(true);
+    expect(isLocallyFree(unjammed, "c")).toBe(true);
+
+    const childrenBox = childrenFitBoxAbsolute(unjammed, "root")!;
+    const childSpan = Math.max(childrenBox.x2 - childrenBox.x1, childrenBox.y2 - childrenBox.y1);
+    const footprint = 36;
+    const minSeparation = footprint + 2 * unjammed.nodeOverlapPadding;
+    expect(childSpan).toBeLessThan(footprint + 2 * minSeparation + 8);
+
+    const probeTau = 1;
+    const fitOuter = parentOuterBoundsFromChildFit(
+      childrenBox,
+      COMPOUND_PADDING.left + probeTau,
+    );
+    let x1 = Math.min(beforeOuter.x1, fitOuter.x1);
+    let y1 = Math.min(beforeOuter.y1, fitOuter.y1);
+    let x2 = Math.max(beforeOuter.x2, fitOuter.x2);
+    let y2 = Math.max(beforeOuter.y2, fitOuter.y2);
+    if (x2 - x1 < COMPOUND_MIN_WIDTH) {
+      const pad = (COMPOUND_MIN_WIDTH - (x2 - x1)) / 2;
+      x1 -= pad;
+      x2 += pad;
+    }
+    if (y2 - y1 < COMPOUND_MIN_HEIGHT) {
+      const pad = (COMPOUND_MIN_HEIGHT - (y2 - y1)) / 2;
+      y1 -= pad;
+      y2 += pad;
+    }
+    const afterOuter = compositeOuterBox(unjammed, "root")!;
+    expect(afterOuter.x1).toBeCloseTo(x1, 6);
+    expect(afterOuter.y1).toBeCloseTo(y1, 6);
+    expect(afterOuter.x2).toBeCloseTo(x2, 6);
+    expect(afterOuter.y2).toBeCloseTo(y2, 6);
+  });
+
+  it("grows a flush parent by the probe slack so a valid rest becomes locally free", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root", isCompound: true },
+        { id: "child", parent: "root", footprint: { halfW: 32, halfHTop: 32, halfHBottom: 32 } },
+      ],
+      {
+        root: { x: 0, y: 0, w: 80, h: 80 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    expect(isValidRest(model, "child")).toBe(true);
+    expect(isLocallyFree(model, "child")).toBe(false);
+
+    const { model: unjammed, changed } = unjamLayoutModel(model);
+    expect(changed).toBe(true);
+    expect(unjammed.nodes.get("root")!.size).toEqual({ w: 82, h: 82 });
+    expect(isLocallyFree(unjammed, "child")).toBe(true);
+  });
+
+  it("keeps an obstacle-free ring candidate instead of the diagonal fallback when grow stalls", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root", isCompound: true },
+        { id: "a", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+        { id: "b", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+      ],
+      {
+        root: { x: 0, y: 0, w: 90, h: 90 },
+        a: { x: 0, y: 0 },
+        b: { x: 0, y: 0 },
+      },
+    );
+    let growCalls = 0;
+    vi.spyOn(layoutModel, "growCompositeToFitChildren").mockImplementation(() => {
+      growCalls += 1;
+      return true;
+    });
+    const beforeA = { ...model.nodes.get("a")!.center };
+    const { model: unjammed, changed } = unjamLayoutModel(model, { bootstrap: true, ringStep: 40 });
+    expect(changed).toBe(true);
+    expect(growCalls).toBeGreaterThan(1);
+    expect(unjammed.nodes.get("a")!.center).not.toEqual(beforeA);
+    vi.restoreAllMocks();
   });
 
   it("skips sibling groups that contain only overflow children", () => {

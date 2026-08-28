@@ -8,6 +8,7 @@ import {
   compositeInteriorBox,
   compositeOuterBox,
   flatLayoutFromModel,
+  growCompositeToFitChildren,
   isAncestor,
   minimumCompositeOuterBox,
   moveChild,
@@ -475,6 +476,77 @@ describe("layout-model move and resize branches", () => {
     const minBox = minimumCompositeOuterBox(model, "parent");
     expect(minBox).not.toBeNull();
     expect(minBox!.x2 - minBox!.x1).toBeGreaterThan(60);
+  });
+
+  it("growCompositeToFitChildren enlarges height to the compound minimum without widening around an off-centre child", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        parent: { x: 500, y: 300, w: 100, h: 70 },
+        child: { x: 30, y: 0 },
+      },
+    );
+    expect(growCompositeToFitChildren(model, "parent")).toBe(true);
+    expect(model.nodes.get("parent")!.size).toEqual({ w: 100, h: 80 });
+    expect(absoluteCenter(model, "parent")).toEqual({ x: 500, y: 300 });
+    expect(growCompositeToFitChildren(model, "parent")).toBe(false);
+  });
+
+  it("growCompositeToFitChildren adds optional slack around a flush child fit", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 32, halfHTop: 32, halfHBottom: 32 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 80, h: 80 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    expect(growCompositeToFitChildren(model, "parent")).toBe(false);
+    expect(growCompositeToFitChildren(model, "parent", { slack: 1 })).toBe(true);
+    expect(model.nodes.get("parent")!.size).toEqual({ w: 82, h: 82 });
+    expect(growCompositeToFitChildren(model, "parent", { slack: Number.NaN })).toBe(false);
+    expect(growCompositeToFitChildren(model, "parent", { slack: -4 })).toBe(false);
+  });
+
+  it("growCompositeToFitChildren floors only the short axis of an already-tall parent", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 60, h: 120 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    expect(growCompositeToFitChildren(model, "parent")).toBe(true);
+    expect(model.nodes.get("parent")!.size).toEqual({ w: COMPOUND_MIN_WIDTH, h: 120 });
+  });
+
+  it("growCompositeToFitChildren floors an empty compound at minimum size around its current centre", () => {
+    const model = buildLayoutModel(
+      [{ id: "parent", isCompound: true }],
+      { parent: { x: 10, y: 20, w: 40, h: 30 } },
+    );
+    expect(growCompositeToFitChildren(model, "parent")).toBe(true);
+    expect(model.nodes.get("parent")!.size).toEqual({
+      w: COMPOUND_MIN_WIDTH,
+      h: COMPOUND_MIN_HEIGHT,
+    });
+    expect(absoluteCenter(model, "parent")).toEqual({ x: 10, y: 20 });
+  });
+
+  it("growCompositeToFitChildren returns false when the compound has no outer box", () => {
+    const model = buildLayoutModel(
+      [{ id: "parent", isCompound: true }],
+      { parent: { x: 0, y: 0 } },
+    );
+    expect(growCompositeToFitChildren(model, "parent")).toBe(false);
   });
 
   it("resizeCompoundBoxFromCorner expands width independently when height already satisfies minimum", () => {
