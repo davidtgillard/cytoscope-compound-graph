@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { CompoundGraphScene } from "./compound-graph-scene";
+import { LEAF_NODE_DIAMETER } from "./cytoscape-theme";
 import { nodesOverlapInModel } from "./layout-model";
 import { captureTapstartHandler, headlessCy, syntheticTapstart } from "../tests/helpers/fixtures";
 
@@ -725,6 +726,83 @@ describe("CompoundGraphScene internals", () => {
     const { changed } = scene.unjamLoadedLayout(cy, { bootstrap: true });
     expect(changed).toBe(true);
     expect(cy.getElementById("a").position("x")).not.toBeCloseTo(cy.getElementById("b").position("x"), 0);
+  });
+
+  it("unjamLoadedLayout preserves zoom-compensated leaf diameters and does not call cy.resize", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 400, compoundHeight: 400 },
+        { id: "a", label: "a", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+        { id: "b", label: "b", color: "#a8b4c4", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    cy.batch(() => {
+      cy.nodes("[kind = 'leaf']").forEach((node) => {
+        node.data("nodeWidth", 72);
+        node.data("nodeHeight", 72);
+      });
+    });
+    const resize = vi.spyOn(cy, "resize");
+    const { changed } = scene.unjamLoadedLayout(cy, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(resize).not.toHaveBeenCalled();
+    expect(cy.getElementById("a").data("nodeWidth")).toBe(72);
+    expect(cy.getElementById("a").data("nodeHeight")).toBe(72);
+    expect(cy.getElementById("b").data("nodeWidth")).toBe(72);
+    expect(cy.getElementById("b").data("nodeHeight")).toBe(72);
+    resize.mockRestore();
+  });
+
+  it("initializeFromCy and unjamLoadedLayout use the fitted zoom so children are not the default diameter", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 400, compoundHeight: 400 },
+        { id: "a", label: "a", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+        { id: "b", label: "b", color: "#a8b4c4", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    const fittedZoom = 0.5;
+    vi.spyOn(cy, "zoom").mockImplementation(
+      ((...args: Parameters<typeof cy.zoom>) => (args.length === 0 ? fittedZoom : cy)) as typeof cy.zoom,
+    );
+    expect(cy.getElementById("a").data("nodeWidth")).toBe(LEAF_NODE_DIAMETER);
+    scene.initializeFromCy(cy);
+    const modelWidth = LEAF_NODE_DIAMETER / fittedZoom;
+    expect(cy.getElementById("a").data("nodeWidth")).toBeCloseTo(modelWidth);
+    expect(cy.getElementById("b").data("nodeWidth")).toBeCloseTo(modelWidth);
+    const { changed } = scene.unjamLoadedLayout(cy, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(cy.getElementById("a").data("nodeWidth")).toBeCloseTo(modelWidth);
+    expect(cy.getElementById("b").data("nodeWidth")).toBeCloseTo(modelWidth);
+    scene.initializeFromCy(cy);
+    expect(cy.getElementById("a").data("nodeWidth")).toBeCloseTo(modelWidth);
+  });
+
+  it("unjamLoadedLayout converts default diameters if the viewport was fitted after initialize", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 400, compoundHeight: 400 },
+        { id: "a", label: "a", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+        { id: "b", label: "b", color: "#a8b4c4", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    expect(cy.getElementById("a").data("nodeWidth")).toBe(LEAF_NODE_DIAMETER);
+    const fittedZoom = 0.5;
+    vi.spyOn(cy, "zoom").mockImplementation(
+      ((...args: Parameters<typeof cy.zoom>) => (args.length === 0 ? fittedZoom : cy)) as typeof cy.zoom,
+    );
+    const { changed } = scene.unjamLoadedLayout(cy, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(cy.getElementById("a").data("nodeWidth")).toBeCloseTo(LEAF_NODE_DIAMETER / fittedZoom);
+    expect(asInternal(scene).referenceZoom).toBe(fittedZoom);
   });
 
   it("unjamLoadedLayout reports unchanged for a free layout", () => {

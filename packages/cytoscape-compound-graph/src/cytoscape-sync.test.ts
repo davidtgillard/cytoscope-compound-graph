@@ -1,5 +1,5 @@
 import cytoscape from "cytoscape";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCompoundGraphStylesheet } from "./cytoscape-theme";
 import { applyLayoutModelToCy, layoutModelFromCy } from "./cytoscape-sync";
 import { compoundAbsolutePosition } from "./cytoscape-utils";
@@ -55,6 +55,33 @@ describe("cytoscape-sync", () => {
     applyLayoutModelToCy(cy, model);
     expect(Number(cy.getElementById("parent").data("compoundWidth"))).toBeGreaterThan(220);
     expect(cy.getElementById("child").position().x).not.toBe(0);
+  });
+
+  it("applyLayoutModelToCy does not call cy.resize so leaf diameters are not frozen mid-style", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        { data: { id: "parent", kind: "container", compoundWidth: 200, compoundHeight: 160 }, position: { x: 0, y: 0 } },
+        { data: { id: "child", kind: "leaf", nodeWidth: 72, nodeHeight: 72 }, position: { x: 0, y: 0 } },
+      ],
+    });
+    const resize = vi.spyOn(cy, "resize");
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent" },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 160 },
+        child: { x: 8, y: 4 },
+      },
+    );
+    applyLayoutModelToCy(cy, model);
+    expect(resize).not.toHaveBeenCalled();
+    expect(cy.getElementById("child").data("nodeWidth")).toBe(72);
+    expect(cy.getElementById("child").data("nodeHeight")).toBe(72);
+    resize.mockRestore();
   });
 
   it("applyLayoutModelToCy skips missing cy nodes and overflow nodes", () => {

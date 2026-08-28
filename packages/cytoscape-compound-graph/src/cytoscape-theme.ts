@@ -1,4 +1,4 @@
-import type { StylesheetStyle } from "cytoscape";
+import type { Core, NodeSingular, StylesheetStyle } from "cytoscape";
 
 /**
  * Visual and layout tuning for a nested compound graph backed by Cytoscape.
@@ -135,6 +135,110 @@ export function leafDomVisualStyle(partial?: Partial<CompoundGraphTheme>): LeafD
 }
 
 /**
+ * Cytoscape scratch flag: leaf `nodeWidth` / label metrics are already model units for the
+ * frozen fit zoom. Until this is set, leaf styles divide screen-pixel data by the live zoom
+ * so a `fit` cannot shrink children to the uncompensated 36px model diameter.
+ */
+const LEAF_METRICS_MODEL_SPACE_SCRATCH = "_ccgLeafMetricsModelSpace";
+const LEAF_ZOOM_STYLE_HOOK_SCRATCH = "_ccgLeafZoomStyleHook";
+
+function ensureLiveZoomLeafStyle(cy: Core): void {
+  if (cy.scratch(LEAF_ZOOM_STYLE_HOOK_SCRATCH)) {
+    return;
+  }
+  cy.scratch(LEAF_ZOOM_STYLE_HOOK_SCRATCH, true);
+  cy.on("zoom", () => {
+    /* v8 ignore start -- the instance can be torn down while a zoom event is queued */
+    if (cy.destroyed()) {
+      return;
+    }
+    /* v8 ignore stop */
+    if (cy.scratch(LEAF_METRICS_MODEL_SPACE_SCRATCH)) {
+      return;
+    }
+    refreshLeafStyle(cy);
+  });
+}
+
+function refreshLeafStyle(cy: Core): void {
+  const styleApi = typeof cy.style === "function" ? cy.style() : undefined;
+  if (styleApi && typeof (styleApi as { update?: () => void }).update === "function") {
+    (styleApi as { update: () => void }).update();
+  }
+}
+
+/**
+ * Screen-pixel leaf metric → model units. Before initialize/unjam freezes the fit zoom,
+ * this tracks the live zoom so children keep their themed on-screen diameter.
+ */
+function leafScreenMetric(ele: NodeSingular, dataKey: string, screenDefault: number): number {
+  const raw = Number(ele.data(dataKey));
+  const screen = Number.isFinite(raw) && raw > 0 ? raw : screenDefault;
+  const cy = ele.cy();
+  ensureLiveZoomLeafStyle(cy);
+  if (cy.scratch(LEAF_METRICS_MODEL_SPACE_SCRATCH)) {
+    return screen;
+  }
+  const zoom = cy.zoom();
+  return zoom > 0 ? screen / zoom : screen;
+}
+
+function modelUnitsForScreenDefault(
+  current: unknown,
+  zoom: number,
+  screenDefault: number,
+): number | null {
+  const value = Number(current);
+  if (!Number.isFinite(value) || !(zoom > 0)) {
+    return null;
+  }
+  const expected = screenDefault / zoom;
+  if (Math.abs(value - expected) <= 1e-3) {
+    return null;
+  }
+  if (Math.abs(value - screenDefault) <= 1e-3) {
+    return expected;
+  }
+  return null;
+}
+
+/**
+ * Writes zoom-compensated leaf diameters and label metrics into Cytoscape data so packing
+ * and painting use the same size. Idempotent: already-compensated values (or custom sizes
+ * that are not the theme defaults) are left alone. Freezes live-zoom stylesheet mapping.
+ *
+ * Call before measuring footprints or unjamming. `initializeFromCy` and
+ * `CompoundGraphScene.unjamLoadedLayout` do this automatically.
+ */
+export function applyReferenceZoomToLeafMetrics(cy: Core, referenceZoom: number): boolean {
+  const zoom = Number.isFinite(referenceZoom) && referenceZoom > 0 ? referenceZoom : 1;
+  const screen: Record<string, number> = {
+    nodeWidth: DEFAULT_COMPOUND_GRAPH_THEME.leafNode.diameter,
+    nodeHeight: DEFAULT_COMPOUND_GRAPH_THEME.leafNode.diameter,
+    labelFontSize: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.fontSize,
+    labelOutlineWidth: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.outlineWidth,
+    labelMarginY: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.marginY,
+    selectionOutlineWidth: DEFAULT_COMPOUND_GRAPH_THEME.leafSelection.outlineWidth,
+  };
+  let changed = false;
+  cy.batch(() => {
+    cy.nodes("[kind = 'leaf']").forEach((node) => {
+      for (const dataKey of Object.keys(screen)) {
+        const next = modelUnitsForScreenDefault(node.data(dataKey), zoom, screen[dataKey]!);
+        if (next === null) {
+          continue;
+        }
+        node.data(dataKey, next);
+        changed = true;
+      }
+    });
+  });
+  cy.scratch(LEAF_METRICS_MODEL_SPACE_SCRATCH, true);
+  refreshLeafStyle(cy);
+  return changed;
+}
+
+/**
  * Builds the Cytoscape stylesheet for container + leaf nodes. The container node is a
  * plain, explicitly-sized rectangle (not a native compound parent); its border renders
  * labels are drawn via DOM overlays driven by {@link GraphParentVertex.parentDragVisual}.
@@ -158,20 +262,23 @@ export function createCompoundGraphStylesheet(
     {
       selector: "node[kind = 'leaf']",
       style: ({
-        "font-size": "data(labelFontSize)",
+        "font-size": (ele: NodeSingular) =>
+          leafScreenMetric(ele, "labelFontSize", theme.leafLabel.fontSize),
         "font-family": "data(labelFontFamily)",
         "font-weight": "data(labelFontWeight)",
         color: "data(labelColor)",
         "text-outline-color": "data(labelOutlineColor)",
-        "text-outline-width": "data(labelOutlineWidth)",
+        "text-outline-width": (ele: NodeSingular) =>
+          leafScreenMetric(ele, "labelOutlineWidth", theme.leafLabel.outlineWidth),
         "text-valign": "bottom",
         "text-halign": "center",
-        "text-margin-y": "data(labelMarginY)",
+        "text-margin-y": (ele: NodeSingular) =>
+          leafScreenMetric(ele, "labelMarginY", theme.leafLabel.marginY),
         "text-wrap": "wrap",
         "text-max-width": "120px",
         "background-color": "data(color)",
-        width: "data(nodeWidth)",
-        height: "data(nodeHeight)",
+        width: (ele: NodeSingular) => leafScreenMetric(ele, "nodeWidth", theme.leafNode.diameter),
+        height: (ele: NodeSingular) => leafScreenMetric(ele, "nodeHeight", theme.leafNode.diameter),
         shape: "ellipse",
         "z-index": 10,
       } as unknown) as StylesheetStyle["style"],

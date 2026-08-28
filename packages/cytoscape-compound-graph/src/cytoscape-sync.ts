@@ -67,6 +67,12 @@ export function layoutModelFromCy(
 /**
  * Model centre is authoritative. The container is a plain node (see cytoscape-theme.ts),
  * so writing every node's absolute center directly is all that's needed.
+ *
+ * Do not call `cy.resize()` here. That API is for when the HTML container's pixel size
+ * changes: it clears the canvas and defers the next paint. After load-time unjam the
+ * consumer often still has to write zoom-compensated `nodeWidth`/`nodeHeight`; a deferred
+ * paint from `resize()` can freeze leaves at the default 36px diameter until a later
+ * gesture forces a redraw.
  */
 function applyModelSync(cy: Core, model: WorkPackageLayoutModel): void {
   const sortedIds = [...model.nodes.keys()].sort(
@@ -104,5 +110,4 @@ function applyModelSync(cy: Core, model: WorkPackageLayoutModel): void {
 
 export function applyLayoutModelToCy(cy: Core, model: WorkPackageLayoutModel): void {
   applyModelSync(cy, model);
-  cy.resize();
 }

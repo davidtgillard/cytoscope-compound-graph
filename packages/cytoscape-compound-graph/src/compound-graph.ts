@@ -2,6 +2,7 @@ import type { Core, EventObject } from "cytoscape";
 import cytoscape from "cytoscape";
 import { applyLayoutModelToCy, layoutModelFromCy } from "./cytoscape-sync";
 import {
+  applyReferenceZoomToLeafMetrics,
   LEAF_LABEL_COLOR,
   LEAF_LABEL_FONT_FAMILY,
   LEAF_LABEL_FONT_SIZE,
@@ -301,12 +302,13 @@ export class GraphParentVertex {
 
   /** Initial Cytoscape setup: measure, then snapshot the authoritative model. */
   initializeFromCy(cy: Core): GraphSnapshot {
+    const zoom = cy.zoom();
+    this.referenceZoom = zoom > 0 ? zoom : 1;
+    applyReferenceZoomToLeafMetrics(cy, this.referenceZoom);
     this.measureFromCy(cy);
     this.syncModelFromCy(cy);
     enableContainerDragging(cy, [this.id]);
     configureDetachedChildDrag(cy, this.childIds);
-    const zoom = cy.zoom();
-    this.referenceZoom = zoom > 0 ? zoom : 1;
     return snapshotGraphState(cy, this.id, this.childIds);
   }
 

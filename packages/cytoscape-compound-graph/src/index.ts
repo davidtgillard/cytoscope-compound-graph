@@ -94,6 +94,7 @@ export {
 } from "./layout-unjam";
 
 export {
+  applyReferenceZoomToLeafMetrics,
   type CompoundGraphTheme,
   type LeafDomVisualStyle,
   DEFAULT_COMPOUND_GRAPH_THEME,

@@ -2,6 +2,7 @@ import type { Core, EventObject } from "cytoscape";
 import cytoscape from "cytoscape";
 import { applyLayoutModelToCy, layoutModelFromCy } from "./cytoscape-sync";
 import {
+  applyReferenceZoomToLeafMetrics,
   LEAF_LABEL_COLOR,
   LEAF_LABEL_FONT_FAMILY,
   LEAF_LABEL_FONT_SIZE,
@@ -286,6 +287,9 @@ export class CompoundGraphScene {
   }
 
   initializeFromCy(cy: Core): void {
+    const zoom = cy.zoom();
+    this.referenceZoom = zoom > 0 ? zoom : 1;
+    applyReferenceZoomToLeafMetrics(cy, this.referenceZoom);
     cy.batch(() => {
       for (const node of this.nodeSpecs.values()) {
         const cyNode = cy.getElementById(node.id);
@@ -318,8 +322,6 @@ export class CompoundGraphScene {
     this.syncModelFromCy(cy);
     enableContainerDragging(cy, this.containerIds());
     configureDetachedChildDrag(cy, this.draggableLeafIds());
-    const zoom = cy.zoom();
-    this.referenceZoom = zoom > 0 ? zoom : 1;
   }
 
   ensureModelFromCy(cy: Core): WorkPackageLayoutModel {
@@ -523,6 +525,12 @@ export class CompoundGraphScene {
     if (!this.model) {
       throw new Error("layout model not initialized");
     }
+    const liveZoom = cy.zoom();
+    const zoomForMetrics = liveZoom > 0 ? liveZoom : this.referenceZoom;
+    if (applyReferenceZoomToLeafMetrics(cy, zoomForMetrics) && liveZoom > 0) {
+      this.referenceZoom = liveZoom;
+    }
+    this.refreshFootprintsFromCy(cy);
     const result = unjamLayoutModel(this.model, options);
     this.model = result.model;
     if (result.changed) {
