@@ -546,4 +546,137 @@ describe("compound-graph internals", () => {
     const constraints = parent.computeResizeChildConstraints(cy);
     expect(constraints.edgeClearance).toBeGreaterThan(0);
   });
+
+  it("setEdgeClearance no-ops during an active child drag and rejects non-finite values", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = asInternal(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    parent.setEdgeClearance(Number.NaN);
+    expect(parent.getModel()?.nodes.get("parent")?.reservedEdge).toBe(0);
+    internal.beginChildDrag(cy, "child");
+    parent.setEdgeClearance(9);
+    expect(parent.getModel()?.nodes.get("parent")?.reservedEdge).toBe(0);
+    internal.finishChildDrag(cy);
+  });
+
+  it("liveSnapshot falls back when the session is missing or a child node disappears", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [
+        { id: "child-a", label: "child-a", color: "#111" },
+        { id: "child-b", label: "child-b", color: "#222" },
+      ],
+    });
+    const internal = withMutableModel(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.childDragActive = true;
+    internal.childDragSession = null;
+    expect(parent.liveSnapshot(cy)).toEqual(parent.snapshot(cy));
+    internal.childDragActive = false;
+    internal.beginChildDrag(cy, "child-a");
+    expect(internal.childDragActive).toBe(true);
+    internal.model!.nodes.delete("child-b");
+    const snap = parent.liveSnapshot(cy);
+    expect(snap.children["child-a"]).toBeDefined();
+    expect(snap.children["child-b"]).toBeUndefined();
+    internal.finishChildDrag(cy);
+  });
+
+  it("refreshFootprintsFromCy skips the node being dragged", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = asInternal(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.beginChildDrag(cy, "child");
+    expect(() => parent.refreshFootprintsFromCy(cy)).not.toThrow();
+    internal.finishChildDrag(cy);
+  });
+
+  it("beginChildDrag aborts when the frozen footprint cannot fit the parent interior", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = withMutableModel(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.model!.nodes.get("parent")!.size = { w: 8, h: 8 };
+    internal.beginChildDrag(cy, "child");
+    expect(internal.childDragActive).toBe(false);
+  });
+
+  it("attachChildDragHandlers ignores tapstart when beginChildDrag cannot start", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = withMutableModel(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.model!.nodes.get("parent")!.size = { w: 8, h: 8 };
+    let tapstartHandler: ((event: EventObject) => void) | undefined;
+    const realOn = cy.on.bind(cy);
+    vi.spyOn(cy, "on").mockImplementation(((eventName: string, selector: unknown, fn: unknown) => {
+      if (eventName === "tapstart" && typeof selector === "string" && typeof fn === "function") {
+        tapstartHandler = fn as (event: EventObject) => void;
+      }
+      return realOn(eventName as never, selector as never, fn as never);
+    }) as typeof cy.on);
+    const onStart = vi.fn();
+    parent.attachChildDragHandlers(cy, { onStart });
+    tapstartHandler?.({
+      target: cy.getElementById("child"),
+      originalEvent: new MouseEvent("mousedown", { clientX: 4, clientY: 4 }),
+    } as unknown as EventObject);
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it("syncChildDragByDelta uses the session start model when the live model is cleared", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = withMutableModel(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.beginChildDrag(cy, "child");
+    internal.model = null;
+    expect(() => internal.syncChildDragByDelta(cy, "child", { x: 4, y: 0 })).not.toThrow();
+    internal.finishChildDrag(cy);
+  });
+
+  it("syncParentDragFromCy rebuilds a missing model from cytoscape", () => {
+    const parent = GraphParentVertex.create({
+      id: "parent",
+      label: "parent",
+      color: "#000",
+      children: [{ id: "child", label: "child", color: "#111" }],
+    });
+    const internal = withPrivateMethods(parent);
+    const cy = headlessCy(parent.buildElements());
+    parent.initializeFromCy(cy);
+    internal.model = null;
+    expect(() => internal.syncParentDragFromCy(cy)).not.toThrow();
+    expect(parent.getModel()).not.toBeNull();
+  });
 });

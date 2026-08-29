@@ -952,4 +952,123 @@ describe("CompoundGraphScene internals", () => {
     internal.model!.nodes.delete("parent");
     expect(() => scene.setEdgeClearance(8)).not.toThrow();
   });
+
+  it("initializeFromCy applies a one-axis position when the other coordinate is omitted", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160, x: 40 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", y: 12 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    cy.getElementById("parent").position({ x: 1, y: 7 });
+    cy.getElementById("child").position({ x: 9, y: 2 });
+    scene.initializeFromCy(cy);
+    expect(cy.getElementById("parent").position().x).toBe(40);
+    expect(cy.getElementById("parent").position().y).toBe(7);
+    expect(cy.getElementById("child").position().x).toBe(9);
+    expect(cy.getElementById("child").position().y).toBe(12);
+  });
+
+  it("flatLayoutForSubtree skips subtree ids missing from the flat layout", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    internal.model!.childrenOf.get("parent")!.push("ghost");
+    const subtree = scene.flatLayoutForSubtree("parent");
+    expect(subtree.ghost).toBeUndefined();
+    expect(subtree.child).toBeDefined();
+  });
+
+  it("setEdgeClearance no-ops during child drag and treats non-finite values as zero", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    scene.setEdgeClearance(Number.NaN);
+    expect(scene.getModel()?.nodes.get("parent")?.reservedEdge).toBe(0);
+    internal.beginChildDrag(cy, "child");
+    scene.setEdgeClearance(11);
+    expect(scene.getModel()?.nodes.get("parent")?.reservedEdge).toBe(0);
+    internal.finishChildDrag(cy);
+  });
+
+  it("refreshFootprintsFromCy skips the child currently being dragged", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    internal.beginChildDrag(cy, "child");
+    expect(() => scene.refreshFootprintsFromCy(cy)).not.toThrow();
+    internal.finishChildDrag(cy);
+  });
+
+  it("unjamLoadedLayout uses the stored reference zoom when live zoom is not positive", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    vi.spyOn(cy, "zoom").mockImplementation(
+      ((...args: Parameters<typeof cy.zoom>) => (args.length === 0 ? 0 : cy)) as typeof cy.zoom,
+    );
+    expect(scene.unjamLoadedLayout(cy)).toEqual({ changed: false });
+  });
+
+  it("syncChildDragByDelta uses the session start model when the live model is cleared", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    internal.beginChildDrag(cy, "child");
+    internal.model = null;
+    expect(() => internal.syncChildDragByDelta(cy, "child", { x: 4, y: 0 })).not.toThrow();
+    internal.finishChildDrag(cy);
+  });
+
+  it("syncParentDragFromCy rebuilds a missing model from cytoscape", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    internal.model = null;
+    expect(() => internal.syncParentDragFromCy(cy, "parent")).not.toThrow();
+    expect(scene.getModel()).not.toBeNull();
+  });
 });

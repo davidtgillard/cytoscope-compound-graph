@@ -7,6 +7,9 @@ import {
   cloneLayoutModel,
   compositeInteriorBox,
   compositeOuterBox,
+  isLegalNodeRest,
+  leafFootprintFitsInterior,
+  resolvedEdgeClearance,
   flatLayoutFromModel,
   growCompositeToFitChildren,
   isAncestor,
@@ -776,6 +779,128 @@ describe("layout-model move and resize branches", () => {
     );
     model.nodes.delete("child");
     expect(() => resizeComposite(model, "parent", "se", 20, 20)).not.toThrow();
+  });
+
+  it("isLegalNodeRest covers overflow, missing boxes, roots, and compound leaves", () => {
+    const missing = buildLayoutModel([], {});
+    expect(isLegalNodeRest(missing, "ghost")).toBe(true);
+
+    const overflow = buildLayoutModel(
+      [{ id: "overflow", isOverflow: true }],
+      { overflow: { x: 0, y: 0 } },
+    );
+    expect(isLegalNodeRest(overflow, "overflow")).toBe(true);
+
+    const rootLeaf = buildLayoutModel(
+      [{ id: "root", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } }],
+      { root: { x: 0, y: 0 } },
+    );
+    expect(isLegalNodeRest(rootLeaf, "root")).toBe(true);
+
+    const unsized = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 160 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    unsized.nodes.get("parent")!.size = undefined;
+    expect(isLegalNodeRest(unsized, "parent")).toBe(true);
+    expect(isLegalNodeRest(unsized, "child")).toBe(false);
+  });
+
+  it("leafFootprintFitsInterior rejects missing nodes, orphans, and unsized parents", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+        { id: "orphan", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 160 },
+        child: { x: 0, y: 0 },
+        orphan: { x: 40, y: 0 },
+      },
+    );
+    expect(leafFootprintFitsInterior(model, "missing")).toBe(false);
+    expect(leafFootprintFitsInterior(model, "orphan")).toBe(false);
+    expect(leafFootprintFitsInterior(model, "child")).toBe(true);
+    model.nodes.get("parent")!.size = undefined;
+    expect(leafFootprintFitsInterior(model, "child")).toBe(false);
+  });
+
+  it("resolvedEdgeClearance treats a non-finite reserved edge as zero", () => {
+    const model = buildLayoutModel(
+      [{ id: "parent", isCompound: true }],
+      { parent: { x: 0, y: 0, w: 120, h: 100 } },
+    );
+    model.nodes.get("parent")!.reservedEdge = Number.NaN;
+    expect(resolvedEdgeClearance(model, "parent", 1)).toBeGreaterThan(0);
+    expect(
+      resizeComposite(model, "parent", "se", 0, 0, {
+        childrenBox: null,
+        edgeClearance: Number.NaN,
+        looseEdges: ALL_LOOSE_EDGES,
+      }).nodes.get("parent")?.reservedEdge,
+    ).toBe(0);
+    expect(parentOuterBoundsFromChildFit({ x1: 0, y1: 0, x2: 10, y2: 10 }, Number.NaN)).toEqual({
+      x1: 0,
+      y1: 0,
+      x2: 10,
+      y2: 10,
+    });
+  });
+
+  it("minimumCompositeOuterBox keeps already-large child fits", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 80, halfHTop: 80, halfHBottom: 80 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 400, h: 400 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    const minBox = minimumCompositeOuterBox(model, "parent")!;
+    expect(minBox.x2 - minBox.x1).toBeGreaterThan(COMPOUND_MIN_WIDTH);
+    expect(minBox.y2 - minBox.y1).toBeGreaterThan(COMPOUND_MIN_HEIGHT);
+  });
+
+  it("resizeComposite ignores inverted viewport bounds", () => {
+    const model = buildLayoutModel(
+      [{ id: "parent", isCompound: true }],
+      { parent: { x: 0, y: 0, w: 100, h: 80 } },
+    );
+    const before = compositeOuterBox(model, "parent")!;
+    const resized = resizeComposite(model, "parent", "se", 10, 10, undefined, {
+      viewportBounds: { x1: 400, y1: 400, x2: 410, y2: 410 },
+    });
+    const unconstrained = compositeOuterBox(
+      resizeComposite(model, "parent", "se", 10, 10),
+      "parent",
+    )!;
+    const after = compositeOuterBox(resized, "parent")!;
+    expect(after.x2 - after.x1).toBeCloseTo(unconstrained.x2 - unconstrained.x1, 6);
+    expect(after.x2 - after.x1).not.toBeCloseTo(before.x2 - before.x1, 6);
+  });
+
+  it("subtreeNodeIds stops on cyclic parent/child metadata", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "a", isCompound: true },
+        { id: "b", parent: "a", isCompound: true },
+      ],
+      {
+        a: { x: 0, y: 0, w: 120, h: 100 },
+        b: { x: 0, y: 0, w: 60, h: 50 },
+      },
+    );
+    model.childrenOf.set("b", ["a"]);
+    expect(subtreeNodeIds(model, "a").sort()).toEqual(["a", "b"]);
   });
 
   it("resizeComposite skips descendants whose parent metadata disappears mid-resize", () => {

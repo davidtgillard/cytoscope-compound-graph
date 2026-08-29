@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySubtreePositionsToCy,
+  childDragVisualMetrics,
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
@@ -29,6 +30,32 @@ describe("compound-graph-core", () => {
     expect(() => measureContainerFromCy(cy, "pinned", ["child"])).not.toThrow();
     expect(() => measureContainerFromCy(cy, "pinned", ["ghost"])).not.toThrow();
     expect(cy.getElementById("pinned").data("compoundWidth")).toBe(100);
+  });
+
+  it("measureContainerFromCy sizes a parent from nested container children", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        { data: { id: "parent", kind: "container" }, position: { x: 0, y: 0 } },
+        {
+          data: { id: "nested", kind: "container", compoundWidth: 80, compoundHeight: 60 },
+          position: { x: 12, y: 8 },
+        },
+      ],
+    });
+    measureContainerFromCy(cy, "parent", ["nested"]);
+    expect(Number(cy.getElementById("parent").data("compoundWidth"))).toBeGreaterThan(80);
+    expect(Number(cy.getElementById("parent").data("compoundHeight"))).toBeGreaterThan(60);
+  });
+
+  it("childDragVisualMetrics falls back when footprint or zoom is missing", () => {
+    const model = buildLayoutModel([{ id: "child" }], { child: { x: 0, y: 0 } });
+    const missing = childDragVisualMetrics(model, "missing", 0);
+    expect(missing.footprint).toEqual({ halfW: 18, halfHTop: 18, halfHBottom: 26 });
+    expect(missing.labelMaxWidthPx).toBe(36);
+    const known = childDragVisualMetrics(model, "child", -1);
+    expect(known.labelMaxWidthPx).toBe(known.footprint.halfW * 2);
   });
 
   it("pinContainerToModel and renderedContainerBoxFromModel tolerate missing data", () => {

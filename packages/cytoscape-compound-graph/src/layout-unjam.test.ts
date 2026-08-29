@@ -398,6 +398,51 @@ describe("layout-unjam", () => {
     expect(flatLayoutFromModel(unjammed)).toEqual(flatLayoutFromModel(model));
   });
 
+  it("falls back to a default leaf footprint when none is measured", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "a" },
+        { id: "b" },
+      ],
+      {
+        a: { x: 0, y: 0 },
+        b: { x: 0, y: 0 },
+      },
+    );
+    const { model: unjammed, changed } = unjamLayoutModel(model, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(nodesOverlapInModel(unjammed, "a", "b")).toBe(false);
+  });
+
+  it("skips root groups that contain only overflow nodes", () => {
+    const model = buildLayoutModel(
+      [{ id: "hidden", isOverflow: true }],
+      { hidden: { x: 0, y: 0 } },
+    );
+    expect(unjamLayoutModel(model).changed).toBe(false);
+  });
+
+  it("uses fallback placement for jammed root-level siblings", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "a", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+        { id: "b", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+      ],
+      {
+        a: { x: 0, y: 0 },
+        b: { x: 0, y: 0 },
+      },
+    );
+    const beforeA = { ...model.nodes.get("a")!.center };
+    const { model: unjammed, changed } = unjamLayoutModel(model, {
+      bootstrap: true,
+      maxRings: 0,
+      ringStep: 80,
+    });
+    expect(changed).toBe(true);
+    expect(unjammed.nodes.get("a")!.center).not.toEqual(beforeA);
+  });
+
   it("unjams nested composites deepest-first and grows parent when needed", () => {
     const nestedInputs = [
       { id: "root", isCompound: true },

@@ -109,7 +109,16 @@ describe("live-zoom leaf stylesheet", () => {
     applyReferenceZoomToLeafMetrics(cy, 0.5);
     const frozen = Number(cy.getElementById("child").data("nodeWidth"));
     cy.zoom(0.25);
+    cy.emit("zoom");
     expect(cy.getElementById("child").numericStyle("width")).toBeCloseTo(frozen);
+  });
+
+  it("refreshLeafStyle no-ops when the style API cannot update", () => {
+    const cy = leafCy();
+    vi.spyOn(cy, "style").mockImplementation((() => ({})) as typeof cy.style);
+    cy.zoom(0.4);
+    cy.emit("zoom");
+    expect(cy.getElementById("child").data("kind")).toBe("leaf");
   });
 
   it("keeps screen-pixel width when live zoom is not positive", () => {

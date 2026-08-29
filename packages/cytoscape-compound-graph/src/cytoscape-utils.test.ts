@@ -59,6 +59,28 @@ describe("cytoscape-utils", () => {
     syncLeafFootprintsFromCy(cy, model, "parent");
     expect(model.nodes.get("child")?.footprint).toBeDefined();
     expect(model.nodes.get("missing")?.footprint).toBeUndefined();
+
+    const skipped = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent" },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 200 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    syncLeafFootprintsFromCy(cy, skipped, "parent", new Set(["child"]));
+    expect(skipped.nodes.get("child")?.footprint).toBeUndefined();
+  });
+
+  it("childrenFitBoxAbsoluteFromCy returns null when a composite has no children", () => {
+    const cy = cytoscape({ headless: true, elements: [] });
+    const model = buildLayoutModel([{ id: "lonely", isCompound: true }], {
+      lonely: { x: 0, y: 0, w: 100, h: 80 },
+    });
+    expect(childrenFitBoxAbsoluteFromCy(cy, model, "lonely")).toBeNull();
+    expect(childrenFitBoxAbsoluteFromCy(cy, model, "missing")).toBeNull();
   });
 
   it("childFitBoxAbsoluteFromCy returns null for unknown ids", () => {
@@ -209,6 +231,34 @@ describe("cytoscape-utils", () => {
     const footprint = measureLeafFootprint(node);
     expect(footprint.halfW).toBeGreaterThan(0);
     expect(footprint.halfHBottom).toBeGreaterThan(0);
+  });
+
+  it("measurePaintedLeafFootprint counts blank wrap lines and selection-ring fallback", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        {
+          data: {
+            id: "leaf",
+            kind: "leaf",
+            label: "hello\n\nworld",
+            nodeWidth: 36,
+            nodeHeight: 0,
+            labelFontSize: 11,
+            labelOutlineWidth: 2,
+            labelMarginY: 6,
+            labelMaxWidth: 40,
+            selectionOutlineWidth: 0,
+          },
+          position: { x: 0, y: 0 },
+        },
+      ],
+    });
+    const node = cy.getElementById("leaf");
+    const painted = measurePaintedLeafFootprint(node, { includeSelectionRing: true });
+    expect(painted.halfW).toBeGreaterThan(0);
+    expect(painted.halfHBottom).toBeGreaterThan(painted.halfHTop);
   });
 
   it("measureLeafFootprint includes the label outline and line-box", () => {
