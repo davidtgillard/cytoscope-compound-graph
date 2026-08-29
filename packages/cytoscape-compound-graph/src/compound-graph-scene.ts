@@ -613,6 +613,9 @@ export class CompoundGraphScene {
       dragCleanup = null;
 
       this.beginChildDrag(cy, childId);
+      if (!this.childDragActive) {
+        return;
+      }
       callbacks.onStart?.(childId);
 
       const startClientPoint = clientPoint;

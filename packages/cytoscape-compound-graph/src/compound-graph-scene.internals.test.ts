@@ -470,6 +470,36 @@ describe("CompoundGraphScene internals", () => {
     window.dispatchEvent(new MouseEvent("mouseup", { clientX: 10, clientY: 20 }));
   });
 
+  it("attachChildDragHandlers does not start when the painted footprint cannot fit", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+        { id: "child", label: "child", color: "#94a3b8", kind: "leaf", parent: "parent", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    cy.getElementById("child").data({
+      label: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      labelFontSize: 80,
+      labelMaxWidth: 20,
+      labelMarginY: 0,
+      nodeHeight: 36,
+    });
+    const invokeTapstart = captureTapstartHandler(cy);
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    scene.attachChildDragHandlers(cy, { onStart, onEnd });
+    invokeTapstart(
+      syntheticTapstart(cy, "child", new MouseEvent("mousedown", { clientX: 10, clientY: 20 })),
+    );
+    expect(scene.isChildDragInProgress()).toBe(false);
+    expect(onStart).not.toHaveBeenCalled();
+    window.dispatchEvent(new MouseEvent("mouseup", { clientX: 10, clientY: 20 }));
+    expect(onEnd).not.toHaveBeenCalled();
+  });
+
   it("attachChildDragHandlers ignores leaves that are not in the scene spec", () => {
     const scene = CompoundGraphScene.fromSpec({
       nodes: [
