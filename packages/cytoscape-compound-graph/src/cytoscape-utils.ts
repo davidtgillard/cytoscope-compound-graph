@@ -1,8 +1,14 @@
 import type { Core, NodeSingular } from "cytoscape";
-import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH, COMPOUND_PADDING } from "./cytoscape-theme";
+import {
+  COMPOUND_MIN_HEIGHT,
+  COMPOUND_MIN_WIDTH,
+  COMPOUND_PADDING,
+  DEFAULT_COMPOUND_GRAPH_THEME,
+} from "./cytoscape-theme";
 import {
   absoluteCenter,
   compositeOuterBox,
+  type LeafFootprint,
   type WorkPackageLayoutModel,
 } from "./layout-model";
 import type { VisualBox } from "./collision";
@@ -39,19 +45,19 @@ function styleNumber(node: NodeSingular, key: string): number {
 
 /**
  * Measures a leaf's true rendered footprint relative to its own center, using
- * Cytoscape's own label metrics (`boundingBox({ includeLabels })`) plus the line-box of
- * the label. `text-valign: bottom` means the label hangs below the shape and can be
- * wider than it. Cytoscape's label box is glyph ink, so a line of text still occupies
- * its em-box and `text-outline` extends beyond the ink; both are added here so a child
- * cannot sit on the parent perimeter and then jump back when the line-box is painted.
- * `labelMaxWidth` is only a cap, matching CSS `max-width` wrapping.
+ * Cytoscape's own label metrics (`boundingBox({ includeLabels })`) plus the CSS
+ * line-box of every wrapped label line. `text-valign: bottom` means the label hangs
+ * below the shape and can be wider than it. Cytoscape's label box is glyph ink, so a
+ * line of text still occupies its em-box and `text-outline` extends beyond the ink.
+ * Wrapping increases height (line count × font-size); it does not shrink width below
+ * the laid-out line box. `includeSelectionRing` adds the drag-ghost selection halo,
+ * which is always painted during child drag.
  */
 /** @internal */
-export function measureLeafFootprint(node: NodeSingular): {
-  halfW: number;
-  halfHTop: number;
-  halfHBottom: number;
-} {
+export function measurePaintedLeafFootprint(
+  node: NodeSingular,
+  options?: { includeSelectionRing?: boolean },
+): LeafFootprint {
   const center = node.position();
   const shapeBox = node.boundingBox({ includeLabels: false, includeOverlays: false });
   const fullBox = node.boundingBox({ includeLabels: true, includeOverlays: false });
@@ -60,19 +66,77 @@ export function measureLeafFootprint(node: NodeSingular): {
   const marginY = styleNumber(node, "labelMarginY");
   const nodeHeight = styleNumber(node, "nodeHeight");
   const maxWidth = styleNumber(node, "labelMaxWidth");
-  const halfHTop = Math.max(center.y - shapeBox.y1, nodeHeight > 0 ? nodeHeight / 2 : 0);
-  const inkHalfW = Math.max(center.x - fullBox.x1, fullBox.x2 - center.x, halfHTop);
+  const radius = Math.max(center.y - shapeBox.y1, nodeHeight > 0 ? nodeHeight / 2 : 0);
+  const ring = options?.includeSelectionRing
+    ? styleNumber(node, "selectionOutlineWidth") ||
+      DEFAULT_COMPOUND_GRAPH_THEME.leafSelection.outlineWidth
+    : 0;
+  const inkHalfW = Math.max(center.x - fullBox.x1, fullBox.x2 - center.x, radius);
   const inkBottom = fullBox.y2 - center.y;
-  const lineBoxBottom = halfHTop + marginY + fontSize + outline;
-  let halfW = inkHalfW + outline;
-  if (maxWidth > 0) {
-    halfW = Math.min(halfW, maxWidth / 2 + outline);
-  }
+  const lineCount = wrappedLabelLineCount(node, fontSize, maxWidth);
+  const lineBoxBottom =
+    lineCount > 0 ? radius + marginY + lineCount * fontSize + outline : radius;
+  const halfHTop = radius + ring;
   return {
-    halfW,
+    halfW: Math.max(inkHalfW + outline, radius + ring),
     halfHTop,
-    halfHBottom: Math.max(inkBottom + outline, lineBoxBottom),
+    halfHBottom: Math.max(inkBottom + outline, lineBoxBottom, radius + ring),
   };
+}
+
+/**
+ * Measures a leaf's layout footprint (shape + wrap-aware label line-boxes, no selection
+ * ring). Used for resize constraints and unjam packing.
+ */
+/** @internal */
+export function measureLeafFootprint(node: NodeSingular): LeafFootprint {
+  return measurePaintedLeafFootprint(node);
+}
+
+/** Approximate how many CSS line-boxes the label occupies, never less than Cytoscape ink. */
+function wrappedLabelLineCount(node: NodeSingular, fontSize: number, maxWidth: number): number {
+  const label = String(node.data("label") ?? "");
+  if (label.length === 0 || !(fontSize > 0)) {
+    return 0;
+  }
+  const center = node.position();
+  const shapeBox = node.boundingBox({ includeLabels: false, includeOverlays: false });
+  const fullBox = node.boundingBox({ includeLabels: true, includeOverlays: false });
+  const nodeHeight = styleNumber(node, "nodeHeight");
+  const marginY = styleNumber(node, "labelMarginY");
+  const radius = Math.max(center.y - shapeBox.y1, nodeHeight > 0 ? nodeHeight / 2 : 0);
+  const inkLabelHeight = Math.max(0, fullBox.y2 - (center.y + radius + marginY));
+  const linesFromInk = Math.max(1, Math.ceil((inkLabelHeight - 1e-6) / fontSize));
+
+  const charWidth = fontSize * 0.6;
+  let estimated = 0;
+  for (const line of label.split("\n")) {
+    if (line.length === 0) {
+      estimated += 1;
+      continue;
+    }
+    if (maxWidth > 0 && charWidth > 0) {
+      estimated += Math.max(1, Math.ceil((line.length * charWidth) / maxWidth));
+    } else {
+      estimated += 1;
+    }
+  }
+  return Math.max(linesFromInk, estimated);
+}
+
+/** Pin the drag-time painted box onto the model so clamp and ghost share one frozen footprint. */
+/** @internal */
+export function freezeDragLeafFootprint(
+  cy: Core,
+  model: WorkPackageLayoutModel,
+  childId: string,
+): void {
+  const layoutNode = model.nodes.get(childId);
+  const cyNode = cy.getElementById(childId);
+  if (!layoutNode || layoutNode.isCompound || cyNode.empty()) {
+    return;
+  }
+  layoutNode.footprint = measurePaintedLeafFootprint(cyNode, { includeSelectionRing: true });
 }
 
 /** Copy live Cytoscape label/shape metrics into the layout model's leaf footprints. */

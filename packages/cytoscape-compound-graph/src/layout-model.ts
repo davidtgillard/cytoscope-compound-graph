@@ -8,6 +8,7 @@ import {
 import {
   boxesOverlap,
   clampBoxEdgesToBounds,
+  containmentShift,
   detectCollision,
   resolvePosition,
   type Point,
@@ -414,11 +415,18 @@ function descendantIds(model: WorkPackageLayoutModel, rootId: string): Set<strin
   return result;
 }
 
+const REST_EPSILON = 1e-6;
+
+function boxInsideBounds(box: VisualBox, bounds: VisualBox): boolean {
+  const { dx, dy } = containmentShift(box, bounds);
+  return Math.abs(dx) <= REST_EPSILON && Math.abs(dy) <= REST_EPSILON;
+}
+
 /**
  * Box used for parent containment (child drag + resize min bounds), matching
  * moveChild's footprint math - no NODE_OVERLAP_PADDING.
  */
-function childFitBoxAbsolute(model: WorkPackageLayoutModel, childId: string): VisualBox | null {
+export function childFitBoxAbsolute(model: WorkPackageLayoutModel, childId: string): VisualBox | null {
   const node = model.nodes.get(childId);
   if (!node) {
     return null;
@@ -853,6 +861,9 @@ export function moveChild(
     x: resolvedAbsolute.x - parentAbsolute.x,
     y: resolvedAbsolute.y - parentAbsolute.y,
   });
+  if (!isLegalNodeRest(next, childId)) {
+    return model;
+  }
   return next;
 }
 
@@ -946,4 +957,61 @@ export function nodesOverlapInModel(
     return false;
   }
   return boxesOverlap(left, right);
+}
+
+/**
+ * True when `nodeId` is a legal rest: it clears every node it may not overlap, and a
+ * parented node keeps its fit box inside the parent interior. Overflow nodes are always
+ * legal. Used as the commit gate for {@link moveChild} so a gesture cannot occupy an
+ * illegal pose even if `resolvePosition` is best-effort.
+ */
+export function isLegalNodeRest(model: WorkPackageLayoutModel, nodeId: string): boolean {
+  const node = model.nodes.get(nodeId);
+  if (!node || node.isOverflow) {
+    return true;
+  }
+
+  const moving =
+    node.isCompound && node.size
+      ? compositeOuterBox(model, nodeId)
+      : childFitBoxAbsolute(model, nodeId);
+  if (!moving || detectCollision(moving, obstacleBoxesFor(model, nodeId))) {
+    return false;
+  }
+
+  const parentId = model.parentOf.get(nodeId);
+  if (!parentId) {
+    return true;
+  }
+
+  const interior = compositeInteriorBox(model, parentId);
+  const fitBox = childFitBoxAbsolute(model, nodeId);
+  if (!interior || !fitBox) {
+    return false;
+  }
+  return boxInsideBounds(fitBox, interior);
+}
+
+/**
+ * True when the child's frozen footprint can sit inside the parent interior at all.
+ * If this is false, a child drag must not start: growing the parent is a resize, not a drag.
+ */
+export function leafFootprintFitsInterior(
+  model: WorkPackageLayoutModel,
+  childId: string,
+): boolean {
+  const node = model.nodes.get(childId);
+  const parentId = model.parentOf.get(childId);
+  if (!node || !parentId) {
+    return false;
+  }
+  const interior = compositeInteriorBox(model, parentId);
+  if (!interior) {
+    return false;
+  }
+  const footprint = leafFootprint(node);
+  return (
+    footprint.halfW * 2 <= interior.x2 - interior.x1 + REST_EPSILON &&
+    footprint.halfHTop + footprint.halfHBottom <= interior.y2 - interior.y1 + REST_EPSILON
+  );
 }

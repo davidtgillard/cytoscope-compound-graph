@@ -19,11 +19,13 @@ import {
 } from "./cytoscape-theme";
 import {
   applySubtreePositionsToCy,
+  childDragVisualMetrics,
   configureDetachedChildDrag,
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
   pinLeafToModel,
+  prepareChildDragFootprint,
   renderedContainerBoxFromModel,
   restoreLeafVisibility,
   viewportBoundsInGraphSpace,
@@ -383,7 +385,7 @@ export class CompoundGraphScene {
   }
 
   setEdgeClearance(modelUnits: number): void {
-    if (!this.model) {
+    if (!this.model || this.childDragActive) {
       return;
     }
     const clearance = Number.isFinite(modelUnits) ? Math.max(0, modelUnits) : 0;
@@ -461,6 +463,7 @@ export class CompoundGraphScene {
       return null;
     }
     const childAbsolute = absoluteCenter(this.model, session.childId);
+    const metrics = childDragVisualMetrics(this.model, session.childId, this.referenceZoom);
     return {
       renderedX: childAbsolute.x * cy.zoom() + cy.pan().x + session.renderedOffset.x,
       renderedY: childAbsolute.y * cy.zoom() + cy.pan().y + session.renderedOffset.y,
@@ -468,6 +471,8 @@ export class CompoundGraphScene {
       zoomScale: cy.zoom() / this.referenceZoom,
       label: spec.label,
       color: spec.color,
+      footprint: metrics.footprint,
+      labelMaxWidthPx: metrics.labelMaxWidthPx,
     };
   }
 
@@ -737,6 +742,9 @@ export class CompoundGraphScene {
       return;
     }
     syncLeafFootprintsFromCy(cy, model, parentId);
+    if (!prepareChildDragFootprint(cy, model, childId)) {
+      return;
+    }
 
     const cyChild = cy.getElementById(childId);
     if (cyChild.empty()) {

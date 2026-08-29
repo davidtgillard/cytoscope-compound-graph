@@ -218,6 +218,7 @@ export function applyReferenceZoomToLeafMetrics(cy: Core, referenceZoom: number)
     labelFontSize: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.fontSize,
     labelOutlineWidth: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.outlineWidth,
     labelMarginY: DEFAULT_COMPOUND_GRAPH_THEME.leafLabel.marginY,
+    labelMaxWidth: 120,
     selectionOutlineWidth: DEFAULT_COMPOUND_GRAPH_THEME.leafSelection.outlineWidth,
   };
   let changed = false;
@@ -275,7 +276,8 @@ export function createCompoundGraphStylesheet(
         "text-margin-y": (ele: NodeSingular) =>
           leafScreenMetric(ele, "labelMarginY", theme.leafLabel.marginY),
         "text-wrap": "wrap",
-        "text-max-width": "120px",
+        "text-max-width": (ele: NodeSingular) =>
+          leafScreenMetric(ele, "labelMaxWidth", 120),
         "background-color": "data(color)",
         width: (ele: NodeSingular) => leafScreenMetric(ele, "nodeWidth", theme.leafNode.diameter),
         height: (ele: NodeSingular) => leafScreenMetric(ele, "nodeHeight", theme.leafNode.diameter),

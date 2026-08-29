@@ -12,6 +12,7 @@ import {
   graphNodeModelPosition,
   measureAndPinCompound,
   measureLeafFootprint,
+  measurePaintedLeafFootprint,
   snapshotDelta,
   snapshotGraphState,
   syncLeafFootprintsFromCy,
@@ -237,6 +238,37 @@ describe("cytoscape-utils", () => {
     expect(footprint.halfHBottom).toBeGreaterThanOrEqual(18 + 6 + 11 + 2);
     expect(footprint.halfW).toBeGreaterThanOrEqual(18 + 2);
     expect(footprint.halfW).toBeLessThanOrEqual(120 / 2 + 2);
+  });
+
+  it("measurePaintedLeafFootprint grows height for wrapped lines and includes the selection ring", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [
+        {
+          data: {
+            id: "leaf",
+            kind: "leaf",
+            label: "a wrapping child title that must occupy two lines of text",
+            nodeWidth: 36,
+            nodeHeight: 36,
+            labelFontSize: 11,
+            labelOutlineWidth: 2,
+            labelMarginY: 6,
+            labelMaxWidth: 120,
+            selectionOutlineWidth: 3,
+          },
+        },
+      ],
+    });
+    const node = cy.getElementById("leaf");
+    node.position({ x: 0, y: 0 });
+    const oneLineFloor = 18 + 6 + 11 + 2;
+    const layoutFootprint = measureLeafFootprint(node);
+    expect(layoutFootprint.halfHBottom).toBeGreaterThan(oneLineFloor);
+    const painted = measurePaintedLeafFootprint(node, { includeSelectionRing: true });
+    expect(painted.halfHTop).toBeGreaterThanOrEqual(layoutFootprint.halfHTop + 3 - 1e-6);
+    expect(painted.halfHBottom).toBeGreaterThanOrEqual(layoutFootprint.halfHBottom);
   });
 
   it("measureAndPinCompound and applyFrozenCompoundSize keep anchors stable", () => {

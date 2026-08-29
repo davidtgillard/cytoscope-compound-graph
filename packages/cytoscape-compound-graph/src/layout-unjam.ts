@@ -18,9 +18,9 @@ import {
 import {
   absoluteCenter,
   canOverlap,
+  childFitBoxAbsolute,
   cloneLayoutModel,
   compositeInteriorBox,
-  compositeOuterBox,
   growCompositeToFitChildren,
   moveChild,
   moveComposite,
@@ -28,6 +28,7 @@ import {
   type LayoutNode,
   type WorkPackageLayoutModel,
 } from "./layout-model";
+import { COMPOUND_MIN_HEIGHT, COMPOUND_MIN_WIDTH } from "./cytoscape-theme";
 
 const EPSILON = 1e-6;
 const DEFAULT_PROBE_TAU = 1;
@@ -96,37 +97,13 @@ function leafFootprint(node: LayoutNode | undefined): {
   );
 }
 
-/** Fit box for parent containment — same math as moveChild (no overlap padding). */
-function childFitBoxAbsolute(
-  model: WorkPackageLayoutModel,
-  childId: string,
-): VisualBox | null {
-  const node = model.nodes.get(childId);
-  /* v8 ignore start -- defensive: only called for existing child ids */
-  if (!node) {
-    return null;
-  }
-  /* v8 ignore stop */
-  if (node.isCompound && node.size) {
-    return compositeOuterBox(model, childId);
-  }
-  const center = absoluteCenter(model, childId);
-  const footprint = leafFootprint(node);
-  return {
-    x1: center.x - footprint.halfW,
-    y1: center.y - footprint.halfHTop,
-    x2: center.x + footprint.halfW,
-    y2: center.y + footprint.halfHBottom,
-  };
+function centersEqual(left: Point, right: Point): boolean {
+  return Math.abs(left.x - right.x) <= EPSILON && Math.abs(left.y - right.y) <= EPSILON;
 }
 
 function boxInsideBounds(box: VisualBox, bounds: VisualBox): boolean {
   const { dx, dy } = containmentShift(box, bounds);
   return Math.abs(dx) <= EPSILON && Math.abs(dy) <= EPSILON;
-}
-
-function centersEqual(left: Point, right: Point): boolean {
-  return Math.abs(left.x - right.x) <= EPSILON && Math.abs(left.y - right.y) <= EPSILON;
 }
 
 /** Same obstacle list as live drag — see obstacleBoxesFor in layout-model.ts. */
@@ -159,8 +136,9 @@ function clearsObstacles(model: WorkPackageLayoutModel, nodeId: string): boolean
 }
 
 /**
- * Valid rest: visual box clears non-ancestor obstacles and the fit box lies
- * inside the parent interior (when parented).
+ * Valid rest for load-time unjam: padded visual box clears non-ancestor obstacles and
+ * the fit box lies inside the parent interior. Live drag uses the slightly looser
+ * {@link isLegalNodeRest} commit gate (bare footprint vs padded obstacles).
  */
 export function isValidRest(model: WorkPackageLayoutModel, nodeId: string): boolean {
   const node = model.nodes.get(nodeId);
@@ -317,6 +295,14 @@ function growParentForUnjam(
   options: UnjamLayoutOptions,
 ): boolean {
   return growCompositeToFitChildren(model, parentId, { slack: unjamGrowSlack(options) });
+}
+
+function compositeBelowMinimum(model: WorkPackageLayoutModel, compositeId: string): boolean {
+  const size = model.nodes.get(compositeId)?.size;
+  if (!size) {
+    return false;
+  }
+  return size.w + EPSILON < COMPOUND_MIN_WIDTH || size.h + EPSILON < COMPOUND_MIN_HEIGHT;
 }
 
 function collectSiblingGroups(model: WorkPackageLayoutModel): SiblingGroup[] {
@@ -512,13 +498,22 @@ export function unjamLayoutModel(
 
   for (const group of collectSiblingGroups(next)) {
     const sortedIds = [...group.childIds].sort();
+    let groupChanged = false;
     for (let index = 0; index < sortedIds.length; index++) {
       if (tryPlaceNode(next, sortedIds[index]!, index, options)) {
         changed = true;
+        groupChanged = true;
       }
     }
 
-    if (group.parentId && growParentForUnjam(next, group.parentId, options)) {
+    if (!group.parentId) {
+      continue;
+    }
+    const needsRoom =
+      groupChanged ||
+      group.childIds.some((id) => !isValidRest(next, id)) ||
+      compositeBelowMinimum(next, group.parentId);
+    if (needsRoom && growParentForUnjam(next, group.parentId, options)) {
       changed = true;
     }
   }

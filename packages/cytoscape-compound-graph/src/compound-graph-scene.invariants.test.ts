@@ -20,7 +20,7 @@
 import { describe, expect, it } from "vitest";
 import cytoscape from "cytoscape";
 import { CompoundGraphScene, type CompoundGraphSceneSpec } from "./compound-graph-scene";
-import { ALL_LOOSE_EDGES, absoluteCenter, buildLayoutModel, childrenFitBoxAbsolute, compositeOuterBox, moveChild } from "./layout-model";
+import { ALL_LOOSE_EDGES, absoluteCenter, buildLayoutModel, childrenFitBoxAbsolute, compositeOuterBox, isLegalNodeRest, moveChild } from "./layout-model";
 import { captureTapstartHandler, headlessCy, syntheticTapstart } from "../tests/helpers/fixtures";
 
 interface RenderedNode {
@@ -185,7 +185,12 @@ describe("CompoundGraphScene positional requirements", () => {
 
     dragLeaf(scene, cy, "left-a", { x: 0, y: -80 }, { x: 180, y: 0 });
 
-    const landed = absoluteCenter(scene.cloneModel(), "left-a");
+    const liveModel = scene.cloneModel();
+    const liveFootprint = liveModel.nodes.get("left-a")!.footprint;
+    if (liveFootprint) {
+      startModel.nodes.get("left-a")!.footprint = { ...liveFootprint };
+    }
+    const landed = absoluteCenter(liveModel, "left-a");
     const sequential = absoluteCenter(
       moveChild(moveChild(startModel, "left-a", liftRelative), "left-a", dropRelative),
       "left-a",
@@ -194,6 +199,47 @@ describe("CompoundGraphScene positional requirements", () => {
 
     expect(landed).toEqual(sequential);
     expect(landed).not.toEqual(replayedFromGrab);
+  });
+
+  it("R3 + R6: dragging a labelled leaf into a wall keeps the parent extent and a legal rest", () => {
+    const spec: CompoundGraphSceneSpec = {
+      nodes: [
+        {
+          id: "parent",
+          label: "parent",
+          color: "#000",
+          kind: "container",
+          x: 0,
+          y: 0,
+          compoundWidth: 420,
+          compoundHeight: 280,
+        },
+        {
+          id: "child",
+          label: "a wrapping child title that must occupy two lines of text",
+          color: "#111",
+          kind: "leaf",
+          parent: "parent",
+          x: 0,
+          y: 0,
+        },
+      ],
+      edges: [],
+      clampParentToViewport: false,
+    };
+    const { scene, cy } = initializedScene(spec);
+    const before = renderedNodes(cy);
+    const start = absoluteCenter(scene.cloneModel(), "child");
+
+    dragLeaf(scene, cy, "child", { x: -40, y: 20 }, { x: -400, y: -300 });
+
+    const after = renderedNodes(cy);
+    expect(after.get("parent")!.size).toEqual(before.get("parent")!.size);
+    expect(after.get("parent")!.position).toEqual(before.get("parent")!.position);
+    const model = scene.cloneModel();
+    expect(isLegalNodeRest(model, "child")).toBe(true);
+    const landed = absoluteCenter(model, "child");
+    expect(landed).not.toEqual(start);
   });
 
   it("R1: dragging a leaf inside a nested container moves only that leaf", () => {

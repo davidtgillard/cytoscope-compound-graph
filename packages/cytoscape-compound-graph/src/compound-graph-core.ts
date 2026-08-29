@@ -3,12 +3,15 @@ import type { VisualBox } from "./collision";
 import {
   INITIAL_COMPOUND_SLACK,
   compoundSizeForContent,
+  freezeDragLeafFootprint,
   measureLeafFootprint,
 } from "./cytoscape-utils";
 import {
   absoluteCenter,
   compositeOuterBox,
+  leafFootprintFitsInterior,
   subtreeNodeIds,
+  type LeafFootprint,
   type WorkPackageLayoutModel,
 } from "./layout-model";
 
@@ -208,4 +211,31 @@ export function restoreLeafVisibility(cy: Core, leafIds: string[]): void {
       child.removeStyle();
     }
   }
+}
+
+/**
+ * Freeze the painted drag footprint on the model. Returns false when the box cannot
+ * fit in the parent interior, in which case child drag must not start.
+ */
+export function prepareChildDragFootprint(
+  cy: Core,
+  model: WorkPackageLayoutModel,
+  childId: string,
+): boolean {
+  freezeDragLeafFootprint(cy, model, childId);
+  return leafFootprintFitsInterior(model, childId);
+}
+
+export function childDragVisualMetrics(
+  model: WorkPackageLayoutModel,
+  childId: string,
+  referenceZoom: number,
+): { footprint: LeafFootprint; labelMaxWidthPx: number } {
+  const fallback: LeafFootprint = { halfW: 18, halfHTop: 18, halfHBottom: 26 };
+  const footprint = model.nodes.get(childId)?.footprint ?? fallback;
+  const zoom = referenceZoom > 0 ? referenceZoom : 1;
+  return {
+    footprint: { ...footprint },
+    labelMaxWidthPx: footprint.halfW * 2 * zoom,
+  };
 }

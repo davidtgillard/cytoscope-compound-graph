@@ -19,11 +19,13 @@ import {
 } from "./cytoscape-theme";
 import {
   applySubtreePositionsToCy,
+  childDragVisualMetrics,
   configureDetachedChildDrag,
   enableContainerDragging,
   measureContainerFromCy,
   pinContainerToModel,
   pinLeafToModel,
+  prepareChildDragFootprint,
   renderedContainerBoxFromModel,
   restoreLeafVisibility,
   viewportBoundsInGraphSpace,
@@ -51,6 +53,7 @@ import {
   resizeLooseEdgesFromOuter,
   type LayoutModelBuildOptions,
   type LayoutNodeInput,
+  type LeafFootprint,
   type MoveCompositeOptions,
   type ResizeChildConstraints,
   type ResizeCorner,
@@ -65,6 +68,10 @@ export interface ChildDragVisual {
   zoomScale: number;
   label: string;
   color: string;
+  /** Frozen painted box (model units) shared with moveChild. */
+  footprint: LeafFootprint;
+  /** CSS max-width of the ghost label before zoomScale, matching the frozen footprint. */
+  labelMaxWidthPx: number;
 }
 
 /** Screen-space bounds for the DOM compound-parent overlay (border + label). */
@@ -252,6 +259,9 @@ export class GraphParentVertex {
    * `fit: true` layout has zoomed in or out.
    */
   setEdgeClearance(modelUnits: number): void {
+    if (this.childDragActive) {
+      return;
+    }
     const node = this.model?.nodes.get(this.id);
     if (node) {
       node.reservedEdge = Number.isFinite(modelUnits) ? Math.max(0, modelUnits) : 0;
@@ -396,6 +406,7 @@ export class GraphParentVertex {
       return null;
     }
     const childAbsolute = absoluteCenter(this.model, session.childId);
+    const metrics = childDragVisualMetrics(this.model, session.childId, this.referenceZoom);
     return {
       renderedX: childAbsolute.x * cy.zoom() + cy.pan().x + session.renderedOffset.x,
       renderedY: childAbsolute.y * cy.zoom() + cy.pan().y + session.renderedOffset.y,
@@ -403,6 +414,8 @@ export class GraphParentVertex {
       zoomScale: cy.zoom() / this.referenceZoom,
       label: childVertex.label,
       color: childVertex.color,
+      footprint: metrics.footprint,
+      labelMaxWidthPx: metrics.labelMaxWidthPx,
     };
   }
 
@@ -639,6 +652,9 @@ export class GraphParentVertex {
 
     const model = this.ensureModelFromCy(cy);
     syncLeafFootprintsFromCy(cy, model, this.id);
+    if (!prepareChildDragFootprint(cy, model, childId)) {
+      return;
+    }
     const cyChild = cy.getElementById(childId);
     if (cyChild.empty()) {
       return;

@@ -68,6 +68,26 @@ describe("layout-unjam", () => {
     expect(flatLayoutFromModel(unjammed)).toEqual(flatLayoutFromModel(model));
   });
 
+  it("does not grow a roomy parent when a child is already a valid flush-to-one-wall rest", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root", isCompound: true },
+        { id: "child", parent: "root", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+      ],
+      {
+        root: { x: 0, y: 0, w: 400, h: 300 },
+        child: { x: -172, y: 0 },
+      },
+    );
+    expect(isValidRest(model, "child")).toBe(true);
+    expect(isLocallyFree(model, "child")).toBe(true);
+
+    const { model: unjammed, changed } = unjamLayoutModel(model);
+    expect(changed).toBe(false);
+    expect(unjammed.nodes.get("root")!.size).toEqual({ w: 400, h: 300 });
+    expect(flatLayoutFromModel(unjammed)).toEqual(flatLayoutFromModel(model));
+  });
+
   it("leaves free siblings unchanged in selective mode", () => {
     const partialLayout = {
       root: { x: 0, y: 0, w: 400, h: 400 },

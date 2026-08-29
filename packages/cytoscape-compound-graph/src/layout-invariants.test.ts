@@ -34,6 +34,7 @@ import {
   compositeOuterBox,
   flatLayoutFromModel,
   growCompositeToFitChildren,
+  isLegalNodeRest,
   moveChild,
   moveComposite,
   nodesOverlapInModel,
@@ -589,6 +590,48 @@ describe("positional requirements", () => {
       expect(absoluteCenter(after, "child").y).toBeGreaterThan(start.y);
     });
 
+    it("clamps a wrapped multi-line label against every wall and corner without moving the parent", () => {
+      const wrappedLabel = { halfW: 60, halfHTop: 21, halfHBottom: 90 };
+      const model = buildLayoutModel(
+        [
+          { id: "parent", isCompound: true },
+          { id: "child", parent: "parent", footprint: wrappedLabel },
+        ],
+        {
+          parent: { x: 0, y: 0, w: 400, h: 280 },
+          child: { x: 0, y: 0 },
+        },
+      );
+      const parentBefore = {
+        center: { ...model.nodes.get("parent")!.center },
+        size: { ...model.nodes.get("parent")!.size! },
+      };
+      const grab = absoluteCenter(model, "child");
+      const targets = [
+        { x: 5000, y: 0 },
+        { x: -5000, y: 0 },
+        { x: 0, y: 5000 },
+        { x: 0, y: -5000 },
+        { x: 5000, y: 5000 },
+        { x: -5000, y: -5000 },
+        { x: 5000, y: -5000 },
+        { x: -5000, y: 5000 },
+      ];
+      let current = model;
+      for (const target of targets) {
+        const next = moveChild(current, "child", target);
+        expect(isLegalNodeRest(next, "child")).toBe(true);
+        expect(
+          boxIsInside(childFitBoxOf(next, "child"), compositeInteriorBox(next, "parent")!),
+        ).toBe(true);
+        expect(next.nodes.get("parent")!.center).toEqual(parentBefore.center);
+        expect(next.nodes.get("parent")!.size).toEqual(parentBefore.size);
+        const landed = absoluteCenter(next, "child");
+        expect(landed).not.toEqual(grab);
+        current = next;
+      }
+    });
+
     it("stops a wide label against a sibling without returning to the grab point", () => {
       const wideLabel = { halfW: 50, halfHTop: 18, halfHBottom: 50 };
       const model = buildLayoutModel(
@@ -681,12 +724,30 @@ describe("positional requirements hold under randomised gestures", () => {
 });
 
 describe("load-time unjam respects the positional requirements", () => {
-  it("leaves already-valid nodes exactly where they were", () => {
-    const before = nestedScenario();
-    const { model: after, changed } = unjamLayoutModel(before);
-    expect(changed).toBe(false);
-    expect(poses(after)).toEqual(poses(before));
-  });
+    it("leaves already-valid nodes exactly where they were", () => {
+      const before = nestedScenario();
+      const { model: after, changed } = unjamLayoutModel(before);
+      expect(changed).toBe(false);
+      expect(poses(after)).toEqual(poses(before));
+    });
+
+    it("does not grow a roomy parent when a child is flush against one wall", () => {
+      const before = buildLayoutModel(
+        [
+          { id: "parent", isCompound: true },
+          { id: "child", parent: "parent", footprint: LEAF },
+        ],
+        {
+          parent: { x: 0, y: 0, w: 400, h: 300 },
+          child: { x: -172, y: 0 },
+        },
+      );
+      expect(isLegalNodeRest(before, "child")).toBe(true);
+      const { model: after, changed } = unjamLayoutModel(before);
+      expect(changed).toBe(false);
+      expect(after.nodes.get("parent")!.size).toEqual(before.nodes.get("parent")!.size);
+      expect(absoluteCenter(after, "child")).toEqual(absoluteCenter(before, "child"));
+    });
 
   it("separates a jammed group without moving nodes in other containers", () => {
     const before = nestedScenario();

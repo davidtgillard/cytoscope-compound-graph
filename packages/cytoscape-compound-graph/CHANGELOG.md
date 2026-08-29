@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Leaf children keep their themed on-screen diameter from the first paint through load-time unjam. Until initialize/unjam freeze the fit zoom, the stylesheet tracks live zoom so a `fit` cannot shrink nodes to the default 36px model size. Metrics are written to Cytoscape before footprints are measured, so packing uses the same size the user sees.
+- Child drag occupies only legal poses: the painted footprint (wrap-aware label line-boxes plus the selection ring) is frozen at pointer-down, `moveChild` rejects any sample that fails `isLegalNodeRest`, and load-time unjam no longer grows a roomy parent when a child is merely flush with one wall.
+- Cytoscape `text-max-width` follows zoom-compensated `labelMaxWidth`, matching the DOM drag ghost wrap column.
 - Load-time unjam no longer calls `cy.resize()` when writing the layout back. That call cleared the canvas and could freeze work-package leaves at the default diameter until a drag or container resize forced a redraw. Footprints are remeasured from Cytoscape before unjam so packing matches the live node size.
 - Load-time unjam grows a parent only to the child-fit plus edge clearance and a 1px drag slack, instead of recentering a minimum-size box on the children or parking jammed nodes on a distant fallback.
 - A child drag that hits a sibling or the container wall now stops at the last legal position instead of jumping back to where the node was grabbed. Child drag resolves the same way a container drag already does: one frame at a time from the last rest pose, so the node cannot occupy an invalid position.
