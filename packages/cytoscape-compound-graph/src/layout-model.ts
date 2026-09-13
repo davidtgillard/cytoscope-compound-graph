@@ -868,6 +868,46 @@ export function moveChild(
 }
 
 /**
+ * Moves a parentless leaf in absolute (root) coordinates, resolving against sibling
+ * obstacles and optional viewport bounds. No-ops for compounds or parented nodes.
+ */
+export function moveRootLeaf(
+  model: WorkPackageLayoutModel,
+  leafId: string,
+  newCenter: { x: number; y: number },
+  options?: MoveCompositeOptions,
+): WorkPackageLayoutModel {
+  const next = cloneLayoutModel(model);
+  const node = next.nodes.get(leafId);
+  const parentId = next.parentOf.get(leafId);
+  if (!node || node.isCompound || parentId) {
+    return next;
+  }
+
+  const footprint = leafFootprint(node);
+  const boxForCenter = (center: Point): VisualBox => ({
+    x1: center.x - footprint.halfW,
+    y1: center.y - footprint.halfHTop,
+    x2: center.x + footprint.halfW,
+    y2: center.y + footprint.halfHBottom,
+  });
+
+  const startCenter = { ...node.center };
+  const resolved = resolvePosition({
+    from: startCenter,
+    to: newCenter,
+    bounds: options?.viewportBounds ?? null,
+    obstacles: obstacleBoxesFor(next, leafId),
+    boxForCenter,
+  });
+  setNodeCenter(next, leafId, resolved);
+  if (!isLegalNodeRest(next, leafId)) {
+    return model;
+  }
+  return next;
+}
+
+/**
  * Drags one corner of `compositeId`'s box by (`dxModel`, `dyModel`), holding every other
  * node - including its own children - exactly where it is.
  *

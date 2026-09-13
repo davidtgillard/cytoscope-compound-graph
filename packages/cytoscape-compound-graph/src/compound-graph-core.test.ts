@@ -4,6 +4,7 @@ import {
   applySubtreePositionsToCy,
   childDragVisualMetrics,
   enableContainerDragging,
+  enableRootLeafDragging,
   measureContainerFromCy,
   pinContainerToModel,
   pinLeafToModel,
@@ -123,7 +124,19 @@ describe("compound-graph-core", () => {
       elements: [],
     });
     expect(() => enableContainerDragging(cy, ["missing"])).not.toThrow();
+    expect(() => enableRootLeafDragging(cy, ["missing"])).not.toThrow();
     expect(() => restoreLeafVisibility(cy, ["missing"])).not.toThrow();
+  });
+
+  it("enableRootLeafDragging grabifies existing leaves", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [{ data: { id: "leaf", kind: "leaf" }, position: { x: 0, y: 0 } }],
+    });
+    cy.getElementById("leaf").ungrabify();
+    enableRootLeafDragging(cy, ["leaf"]);
+    expect(cy.getElementById("leaf").grabbable()).toBe(true);
   });
 
   it("viewportBoundsInGraphSpace inverts pan and zoom into graph coordinates", () => {

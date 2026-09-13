@@ -22,6 +22,7 @@ import {
   childDragVisualMetrics,
   configureDetachedChildDrag,
   enableContainerDragging,
+  enableRootLeafDragging,
   measureContainerFromCy,
   pinContainerToModel,
   pinLeafToModel,
@@ -49,6 +50,7 @@ import {
   isOverflowNodeId,
   moveComposite,
   moveChild,
+  moveRootLeaf,
   resolvedEdgeClearance,
   resizeComposite,
   resizeLooseEdgesFromOuter,
@@ -191,13 +193,45 @@ export class CompoundGraphScene {
       .map((node) => node.id);
   }
 
-  private draggableLeafIds(): string[] {
+  private allLeafIds(): string[] {
     return [...this.nodeSpecs.values()]
       .filter(
         (node) =>
           node.kind === "leaf" && !node.isOverflow && !isOverflowNodeId(node.id),
       )
       .map((node) => node.id);
+  }
+
+  /** Parented leaves that use detached (ungrabified) child-drag. */
+  private detachedChildDragLeafIds(): string[] {
+    return [...this.nodeSpecs.values()]
+      .filter(
+        (node) =>
+          node.kind === "leaf" &&
+          Boolean(node.parent) &&
+          !node.isOverflow &&
+          !isOverflowNodeId(node.id),
+      )
+      .map((node) => node.id);
+  }
+
+  /** Parentless leaves that stay natively grabbable. */
+  private rootLeafIds(): string[] {
+    return [...this.nodeSpecs.values()]
+      .filter(
+        (node) =>
+          node.kind === "leaf" &&
+          !node.parent &&
+          !node.isOverflow &&
+          !isOverflowNodeId(node.id),
+      )
+      .map((node) => node.id);
+  }
+
+  private applyGrabPolicy(cy: Core): void {
+    enableContainerDragging(cy, this.containerIds());
+    enableRootLeafDragging(cy, this.rootLeafIds());
+    configureDetachedChildDrag(cy, this.detachedChildDragLeafIds());
   }
 
   private directChildIds(containerId: string): string[] {
@@ -322,8 +356,7 @@ export class CompoundGraphScene {
       }
     }
     this.syncModelFromCy(cy);
-    enableContainerDragging(cy, this.containerIds());
-    configureDetachedChildDrag(cy, this.draggableLeafIds());
+    this.applyGrabPolicy(cy);
   }
 
   ensureModelFromCy(cy: Core): WorkPackageLayoutModel {
@@ -561,9 +594,8 @@ export class CompoundGraphScene {
     for (const containerId of this.containerIds()) {
       pinContainerToModel(cy, this.model, containerId);
     }
-    restoreLeafVisibility(cy, this.draggableLeafIds());
-    enableContainerDragging(cy, this.containerIds());
-    configureDetachedChildDrag(cy, this.draggableLeafIds());
+    restoreLeafVisibility(cy, this.allLeafIds());
+    this.applyGrabPolicy(cy);
   }
 
   isChildDragInProgress(): boolean {
@@ -578,7 +610,7 @@ export class CompoundGraphScene {
       onEnd?: () => void;
     },
   ): () => void {
-    const draggableLeafIds = new Set(this.draggableLeafIds());
+    const detachedLeafIds = new Set(this.detachedChildDragLeafIds());
     let dragCleanup: (() => void) | null = null;
 
     const stopChildDrag = () => {
@@ -591,8 +623,9 @@ export class CompoundGraphScene {
     const onChildDragStart = (event: EventObject) => {
       const childId = event.target.id();
       const nodeSpec = this.nodeSpecs.get(childId);
+      // Root leaves stay on native grab; skip before preventDefault so Cytoscape can drag them.
       if (
-        !draggableLeafIds.has(childId) ||
+        !detachedLeafIds.has(childId) ||
         this.childDragActive ||
         nodeSpec?.isOverflow ||
         isOverflowNodeId(childId)
@@ -702,6 +735,59 @@ export class CompoundGraphScene {
     };
   }
 
+  /**
+   * Native grab/drag/free for parentless leaves. Call alongside
+   * {@link attachParentDragHandlers}; child-drag intentionally ignores these nodes.
+   */
+  attachRootLeafDragHandlers(
+    cy: Core,
+    callbacks: { onGrab?: (leafId: string) => void; onChange?: () => void },
+  ): () => void {
+    const rootLeafIds = new Set(this.rootLeafIds());
+    const movedDuringGesture = new Map<string, boolean>();
+
+    const onGrab = (event: EventObject) => {
+      const leafId = event.target.id();
+      if (this.childDragActive || !rootLeafIds.has(leafId)) {
+        return;
+      }
+      movedDuringGesture.set(leafId, false);
+      callbacks.onGrab?.(leafId);
+    };
+
+    const onDrag = (event: EventObject) => {
+      const leafId = event.target.id();
+      if (this.childDragActive || !rootLeafIds.has(leafId)) {
+        return;
+      }
+      movedDuringGesture.set(leafId, true);
+      this.syncRootLeafDragFromCy(cy, leafId);
+      callbacks.onChange?.();
+    };
+
+    const onFree = (event: EventObject) => {
+      const leafId = event.target.id();
+      if (this.childDragActive || !rootLeafIds.has(leafId)) {
+        return;
+      }
+      if (movedDuringGesture.get(leafId)) {
+        this.syncRootLeafDragFromCy(cy, leafId);
+        callbacks.onChange?.();
+      }
+      movedDuringGesture.delete(leafId);
+    };
+
+    cy.on("grab", "node[kind = 'leaf']", onGrab);
+    cy.on("drag", "node[kind = 'leaf']", onDrag);
+    cy.on("free", "node[kind = 'leaf']", onFree);
+
+    return () => {
+      cy.removeListener("grab", "node[kind = 'leaf']", onGrab);
+      cy.removeListener("drag", "node[kind = 'leaf']", onDrag);
+      cy.removeListener("free", "node[kind = 'leaf']", onFree);
+    };
+  }
+
   private syncModelFromCy(cy: Core): WorkPackageLayoutModel {
     this.model = layoutModelFromCy(cy, this.layoutInputs, this.layoutModelOptions());
     return this.model;
@@ -789,9 +875,8 @@ export class CompoundGraphScene {
       cy.userPanningEnabled(session.previousUserPanningEnabled);
     }
     if (!model) {
-      restoreLeafVisibility(cy, this.draggableLeafIds());
-      enableContainerDragging(cy, this.containerIds());
-      configureDetachedChildDrag(cy, this.draggableLeafIds());
+      restoreLeafVisibility(cy, this.allLeafIds());
+      this.applyGrabPolicy(cy);
       this.childDragActive = false;
       this.childDragSession = null;
       return;
@@ -801,11 +886,33 @@ export class CompoundGraphScene {
     for (const containerId of this.containerIds()) {
       pinContainerToModel(cy, model, containerId);
     }
-    restoreLeafVisibility(cy, this.draggableLeafIds());
-    enableContainerDragging(cy, this.containerIds());
-    configureDetachedChildDrag(cy, this.draggableLeafIds());
+    restoreLeafVisibility(cy, this.allLeafIds());
+    this.applyGrabPolicy(cy);
     this.childDragActive = false;
     this.childDragSession = null;
+  }
+
+  private syncRootLeafDragFromCy(cy: Core, leafId: string): void {
+    if (!this.model) {
+      this.syncModelFromCy(cy);
+    }
+    if (!this.model) {
+      return;
+    }
+    const cyLeaf = cy.getElementById(leafId);
+    if (cyLeaf.empty()) {
+      return;
+    }
+
+    this.model = moveRootLeaf(
+      this.model,
+      leafId,
+      { x: cyLeaf.position().x, y: cyLeaf.position().y },
+      this.viewportClampOptions(cy),
+    );
+    if (this.model) {
+      pinLeafToModel(cy, this.model, leafId);
+    }
   }
 
   private syncParentDragFromCy(cy: Core, containerId: string): void {

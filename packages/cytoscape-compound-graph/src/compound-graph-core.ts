@@ -195,6 +195,20 @@ export function enableContainerDragging(cy: Core, containerIds: string[]): void 
   }
 }
 
+/**
+ * Keep parentless leaves natively grabbable. Detached child-drag only covers
+ * parented leaves; root leaves need Cytoscape grab/drag/free.
+ */
+export function enableRootLeafDragging(cy: Core, leafIds: string[]): void {
+  for (const leafId of leafIds) {
+    const leaf = cy.getElementById(leafId);
+    if (!leaf.empty()) {
+      leaf.unlock();
+      leaf.grabify();
+    }
+  }
+}
+
 export function configureDetachedChildDrag(cy: Core, leafIds: string[]): void {
   for (const childId of leafIds) {
     const child = cy.getElementById(childId);

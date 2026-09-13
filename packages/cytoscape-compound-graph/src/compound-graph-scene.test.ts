@@ -248,6 +248,84 @@ describe("CompoundGraphScene", () => {
     expect(removeSpy).toHaveBeenCalledWith("free", "node[kind = 'container']", expect.any(Function));
   });
 
+  it("root leaf stays grabbable and attachRootLeafDragHandlers updates the model", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "box",
+          label: "box",
+          color: "#64748b",
+          kind: "container",
+          x: 300,
+          y: 0,
+          compoundWidth: 200,
+          compoundHeight: 160,
+        },
+        { id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 },
+        { id: "child", label: "child", color: "#a8b4c4", kind: "leaf", parent: "box", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+
+    expect(cy.getElementById("root-leaf").grabbable()).toBe(true);
+    expect(cy.getElementById("child").grabbable()).toBe(false);
+
+    const onChange = vi.fn();
+    scene.attachRootLeafDragHandlers(cy, { onChange });
+    const leaf = cy.getElementById("root-leaf");
+    const start = absoluteCenter(scene.getModel()!, "root-leaf");
+    leaf.trigger("grab");
+    leaf.position({ x: start.x + 60, y: start.y + 40 });
+    leaf.trigger("drag");
+    leaf.trigger("free");
+
+    const end = absoluteCenter(scene.getModel()!, "root-leaf");
+    expect(Math.hypot(end.x - start.x, end.y - start.y)).toBeGreaterThan(20);
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("attachChildDragHandlers ignores root leaves so native grab can run", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "box",
+          label: "box",
+          color: "#64748b",
+          kind: "container",
+          compoundWidth: 200,
+          compoundHeight: 160,
+        },
+        { id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 },
+        { id: "child", label: "child", color: "#a8b4c4", kind: "leaf", parent: "box", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    const onStart = vi.fn();
+    const fireTapstart = captureTapstartHandler(cy);
+    scene.attachChildDragHandlers(cy, { onStart });
+    fireTapstart(syntheticTapstart(cy, "root-leaf", new Event("pointerdown")));
+    expect(onStart).not.toHaveBeenCalled();
+    expect(scene.isChildDragInProgress()).toBe(false);
+  });
+
+  it("attachRootLeafDragHandlers cleanup removes listeners", () => {
+    const scene = twoCompoundScene();
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+
+    const removeSpy = vi.spyOn(cy, "removeListener");
+    const cleanup = scene.attachRootLeafDragHandlers(cy, {});
+    cleanup();
+
+    expect(removeSpy).toHaveBeenCalledWith("grab", "node[kind = 'leaf']", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("drag", "node[kind = 'leaf']", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("free", "node[kind = 'leaf']", expect.any(Function));
+  });
+
   it("parentDragVisuals returns selected containers only", () => {
     const scene = twoCompoundScene();
     const cy = headlessCy(scene.buildElements());

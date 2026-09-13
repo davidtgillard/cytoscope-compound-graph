@@ -16,6 +16,7 @@ import {
   minimumCompositeOuterBox,
   moveChild,
   moveComposite,
+  moveRootLeaf,
   nodesOverlapInModel,
   parentOuterBoundsFromChildFit,
   resizeCompoundBoxFromCorner,
@@ -388,6 +389,52 @@ describe("layout-model move and resize branches", () => {
   it("moveComposite no-ops for non-compound ids", () => {
     const model = buildLayoutModel([{ id: "leaf" }], { leaf: { x: 0, y: 0 } });
     expect(moveComposite(model, "leaf", { x: 10, y: 10 })).toEqual(model);
+  });
+
+  it("moveRootLeaf translates a parentless leaf", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root-leaf", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+        { id: "box", isCompound: true },
+      ],
+      {
+        "root-leaf": { x: 0, y: 0 },
+        box: { x: 400, y: 0, w: 100, h: 80 },
+      },
+    );
+    const moved = moveRootLeaf(model, "root-leaf", { x: 80, y: -40 });
+    expect(absoluteCenter(moved, "root-leaf")).toEqual({ x: 80, y: -40 });
+  });
+
+  it("moveRootLeaf no-ops for parented leaves and compounds", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "parent", isCompound: true },
+        { id: "child", parent: "parent", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        parent: { x: 0, y: 0, w: 200, h: 160 },
+        child: { x: 0, y: 0 },
+      },
+    );
+    expect(moveRootLeaf(model, "child", { x: 50, y: 50 })).toEqual(model);
+    expect(moveRootLeaf(model, "parent", { x: 50, y: 50 })).toEqual(model);
+  });
+
+  it("moveRootLeaf stops short of sibling compound collisions", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root-leaf", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+        { id: "box", isCompound: true },
+      ],
+      {
+        "root-leaf": { x: 0, y: 0 },
+        box: { x: 120, y: 0, w: 100, h: 80 },
+      },
+    );
+    const moved = moveRootLeaf(model, "root-leaf", { x: 120, y: 0 });
+    expect(absoluteCenter(moved, "root-leaf").x).toBeLessThan(120);
+    expect(isLegalNodeRest(moved, "root-leaf")).toBe(true);
   });
 
   it("moveComposite clamps the outer box inside viewport bounds", () => {

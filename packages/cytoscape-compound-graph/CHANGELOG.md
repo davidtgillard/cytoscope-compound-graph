@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Root (parentless) leaves stay natively grabbable in `CompoundGraphScene`: only parented leaves are ungrabified for detached child-drag. `attachRootLeafDragHandlers` + `moveRootLeaf` sync and persist root-leaf moves the same way container drag does.
 - Leaf children keep their themed on-screen diameter from the first paint through load-time unjam. Until initialize/unjam freeze the fit zoom, the stylesheet tracks live zoom so a `fit` cannot shrink nodes to the default 36px model size. Metrics are written to Cytoscape before footprints are measured, so packing uses the same size the user sees.
 - Child drag occupies only legal poses: the painted footprint (wrap-aware label line-boxes plus the selection ring) is frozen at pointer-down, `moveChild` rejects any sample that fails `isLegalNodeRest`, and load-time unjam no longer grows a roomy parent when a child is merely flush with one wall.
 - Cytoscape `text-max-width` follows zoom-compensated `labelMaxWidth`, matching the DOM drag ghost wrap column.
