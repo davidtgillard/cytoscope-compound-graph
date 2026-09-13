@@ -5,4 +5,5 @@ apps/demo/dist
 docs/api
 coverage
 *.local
+*.tgz
 humans-only/**

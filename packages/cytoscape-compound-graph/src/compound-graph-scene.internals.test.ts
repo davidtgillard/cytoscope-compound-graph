@@ -15,6 +15,7 @@ type SceneInternals = {
   beginChildDrag(cy: cytoscape.Core, childId: string): void;
   finishChildDrag(cy: cytoscape.Core): void;
   syncParentDragFromCy(cy: cytoscape.Core, containerId: string): void;
+  syncRootLeafDragFromCy(cy: cytoscape.Core, leafId: string): void;
   syncChildDragByDelta(cy: cytoscape.Core, childId: string, delta: { x: number; y: number }): void;
 };
 
@@ -1070,5 +1071,92 @@ describe("CompoundGraphScene internals", () => {
     internal.model = null;
     expect(() => internal.syncParentDragFromCy(cy, "parent")).not.toThrow();
     expect(scene.getModel()).not.toBeNull();
+  });
+
+  it("computeResizeChildConstraints tolerates unknown container ids", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: "parent", label: "parent", color: "#64748b", kind: "container", compoundWidth: 200, compoundHeight: 160 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    const constraints = scene.computeResizeChildConstraints(cy, "missing");
+    expect(constraints.childrenBox).toBeNull();
+    expect(constraints.looseEdges).toEqual({
+      west: false,
+      east: false,
+      north: false,
+      south: false,
+    });
+  });
+
+  it("attachParentDragHandlers ignores child-drag and parented leaves for root-leaf sync", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        {
+          id: "box",
+          label: "box",
+          color: "#64748b",
+          kind: "container",
+          compoundWidth: 200,
+          compoundHeight: 160,
+        },
+        { id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 },
+        { id: "child", label: "child", color: "#a8b4c4", kind: "leaf", parent: "box", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    const onGrab = vi.fn();
+    const onChange = vi.fn();
+    scene.attachParentDragHandlers(cy, { onGrab, onChange });
+
+    internal.childDragActive = true;
+    cy.getElementById("root-leaf").trigger("grab");
+    cy.getElementById("root-leaf").trigger("drag");
+    cy.getElementById("root-leaf").trigger("free");
+    expect(onGrab).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    internal.childDragActive = false;
+
+    cy.getElementById("child").trigger("grab");
+    cy.getElementById("child").trigger("drag");
+    cy.getElementById("child").trigger("free");
+    expect(onGrab).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+
+    cy.getElementById("root-leaf").trigger("grab");
+    cy.getElementById("root-leaf").trigger("free");
+    expect(onGrab).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("syncRootLeafDragFromCy rebuilds a missing model from cytoscape", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [{ id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 }],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    internal.model = null;
+    expect(() => internal.syncRootLeafDragFromCy(cy, "root-leaf")).not.toThrow();
+    expect(scene.getModel()).not.toBeNull();
+  });
+
+  it("syncRootLeafDragFromCy no-ops when the cytoscape node is gone", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [{ id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 }],
+      edges: [],
+    });
+    const internal = asInternal(scene);
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    cy.getElementById("root-leaf").remove();
+    expect(() => internal.syncRootLeafDragFromCy(cy, "root-leaf")).not.toThrow();
   });
 });

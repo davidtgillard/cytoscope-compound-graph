@@ -32,11 +32,12 @@ export interface CompoundGraphTheme {
    */
   nodeOverlapPadding: number;
   /**
-   * When true, compound parent drag is clamped so the outer box stays inside the
+   * When true, top-level node drag is clamped so the moving box stays inside the
    * Cytoscape container's visible pixel bounds ({@link GraphParentVertex.setClampParentToViewport}).
+   * Applies to compound parents and parentless leaves; nested nodes use their parent interior instead.
    */
   clampParentToViewport: boolean;
-  /** Screen-pixel inset from the container edge used by viewport clamping during parent drag. */
+  /** Screen-pixel inset from the container edge used by viewport clamping during parent and root-leaf drag. */
   viewportPaddingPx: number;
   compoundMinSize: { width: number; height: number };
   edgeStyle: {
@@ -161,7 +162,12 @@ function ensureLiveZoomLeafStyle(cy: Core): void {
 }
 
 function refreshLeafStyle(cy: Core): void {
-  const styleApi = typeof cy.style === "function" ? cy.style() : undefined;
+  /* v8 ignore start -- Cytoscape always exposes style() on a live core */
+  if (typeof cy.style !== "function") {
+    return;
+  }
+  /* v8 ignore stop */
+  const styleApi = cy.style();
   if (styleApi && typeof (styleApi as { update?: () => void }).update === "function") {
     (styleApi as { update: () => void }).update();
   }

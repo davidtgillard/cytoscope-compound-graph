@@ -20,8 +20,8 @@
  * R5. A resolved gesture never leaves the moving node overlapping a node it may not
  *     overlap.
  * R6. A resolved gesture never pushes the moving node outside a boundary it started
- *     inside - a leaf stays within its container's interior, a container stays within the
- *     viewport.
+ *     inside - a parented leaf stays within its container's interior, a container or
+ *     parentless leaf stays within the viewport.
  */
 import { describe, expect, it } from "vitest";
 import { containmentShift, type VisualBox } from "./collision";
@@ -37,6 +37,7 @@ import {
   isLegalNodeRest,
   moveChild,
   moveComposite,
+  moveRootLeaf,
   nodesOverlapInModel,
   resizeComposite,
   subtreeNodeIds,
@@ -193,6 +194,7 @@ const NESTED_INPUTS: LayoutNodeInput[] = [
   { id: "right", isCompound: true },
   { id: "mid", parent: "right", isCompound: true },
   { id: "mid-a", parent: "mid", footprint: LEAF },
+  { id: "root-leaf", footprint: LEAF },
 ];
 
 function nestedScenario(): WorkPackageLayoutModel {
@@ -203,6 +205,7 @@ function nestedScenario(): WorkPackageLayoutModel {
     right: { x: 1600, y: 500, w: 500, h: 400 },
     mid: { x: -100, y: 0, w: 220, h: 180 },
     "mid-a": { x: -50, y: 0 },
+    "root-leaf": { x: 750, y: 500 },
   });
 }
 
@@ -233,6 +236,13 @@ describe("positional requirements", () => {
       const after = moveComposite(before, "mid", { x: -80, y: 40 });
       expect(absoluteCenter(after, "mid")).toEqual({ x: 1520, y: 540 });
       expectOnlySubtreeMoved(before, after, "mid");
+    });
+
+    it("holds when a parentless leaf is dragged", () => {
+      const before = nestedScenario();
+      const after = moveRootLeaf(before, "root-leaf", { x: 760, y: 520 });
+      expect(absoluteCenter(after, "root-leaf")).toEqual({ x: 760, y: 520 });
+      expectOnlySubtreeMoved(before, after, "root-leaf");
     });
 
     it("holds when a drag is blocked by a neighbour", () => {
@@ -530,6 +540,33 @@ describe("positional requirements", () => {
       }
     });
 
+    it("stops a parentless leaf short of a neighbour container", () => {
+      const before = nestedScenario();
+      const after = moveRootLeaf(before, "root-leaf", { x: 1000, y: 500 });
+      expectOnlySubtreeMoved(before, after, "root-leaf");
+      expectNoForbiddenOverlap(after, "root-leaf");
+      expect(absoluteCenter(after, "root-leaf").x).toBeLessThan(1000);
+      expect(isLegalNodeRest(after, "root-leaf")).toBe(true);
+    });
+
+    it("keeps a dragged parentless leaf inside the viewport", () => {
+      const model = nestedScenario();
+      const viewportBounds = { x1: 700, y1: 200, x2: 2200, y2: 1000 };
+      for (const target of [
+        { x: 9000, y: 500 },
+        { x: -9000, y: 500 },
+        { x: 750, y: 9000 },
+        { x: 750, y: -9000 },
+      ]) {
+        const after = moveRootLeaf(model, "root-leaf", target, { viewportBounds });
+        expect({
+          target,
+          inside: boxIsInside(childFitBoxOf(after, "root-leaf"), viewportBounds),
+        }).toEqual({ target, inside: true });
+        expectNoForbiddenOverlap(after, "root-leaf");
+      }
+    });
+
     it("keeps a dragged container inside the viewport", () => {
       const model = nestedScenario();
       const viewportBounds = { x1: 700, y1: 200, x2: 2200, y2: 1000 };
@@ -700,6 +737,12 @@ describe("positional requirements hold under randomised gestures", () => {
       expectOnlySubtreeMoved(before, draggedLeaf, leafId);
       expectNoForbiddenOverlap(draggedLeaf, leafId);
 
+      const draggedRootLeaf = moveRootLeaf(before, "root-leaf", target(), {
+        viewportBounds,
+      });
+      expectOnlySubtreeMoved(before, draggedRootLeaf, "root-leaf");
+      expectNoForbiddenOverlap(draggedRootLeaf, "root-leaf");
+
       const containerId = random() < 0.5 ? "left" : "mid";
       const draggedContainer = moveComposite(before, containerId, target(), {
         viewportBounds,
@@ -753,7 +796,7 @@ describe("load-time unjam respects the positional requirements", () => {
     const before = nestedScenario();
     before.nodes.get("left-a")!.center = { x: 0, y: 0 };
     before.nodes.get("left-b")!.center = { x: 0, y: 0 };
-    const untouched = ["right", "mid", "mid-a"];
+    const untouched = ["right", "mid", "mid-a", "root-leaf"];
     const beforePoses = poses(before);
 
     const { model: after, changed } = unjamLayoutModel(before);

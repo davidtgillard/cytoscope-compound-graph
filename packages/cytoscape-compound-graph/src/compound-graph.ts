@@ -281,7 +281,8 @@ export class GraphParentVertex {
   }
 
   /**
-   * Enables or disables clamping compound parent drag to the visible Cytoscape container.
+   * Enables or disables clamping compound parent (and parentless leaf) drag to the visible
+   * Cytoscape container.
    */
   setClampParentToViewport(enabled: boolean): void {
     this.clampParentToViewport = enabled;
@@ -455,10 +456,8 @@ export class GraphParentVertex {
     syncLeafFootprintsFromCy(cy, model, this.id);
     const zoom = cy.zoom();
     const edgeClearance = resolvedEdgeClearance(model, this.id, zoom);
-    const parentNode = model.nodes.get(this.id);
-    if (parentNode) {
-      parentNode.reservedEdge = edgeClearance;
-    }
+    const parentNode = model.nodes.get(this.id)!;
+    parentNode.reservedEdge = edgeClearance;
     const childrenBox = childrenFitBoxAbsolute(model, this.id);
     const outer = compositeOuterBox(model, this.id);
     if (!childrenBox || !outer) {
@@ -501,9 +500,7 @@ export class GraphParentVertex {
       return;
     }
     applyLayoutModelToCy(cy, this.model);
-    if (this.model) {
-      pinContainerToModel(cy, this.model, this.id);
-    }
+    pinContainerToModel(cy, this.model, this.id);
     restoreLeafVisibility(cy, this.childIds);
     enableContainerDragging(cy, [this.id]);
     configureDetachedChildDrag(cy, this.childIds);
@@ -642,10 +639,8 @@ export class GraphParentVertex {
       y: session.startChildAbsolute.y + delta.y - session.parentAbsolute.y,
     });
     this.model = nextModel;
-    if (this.model) {
-      pinContainerToModel(cy, this.model, this.id);
-      pinLeafToModel(cy, this.model, childId);
-    }
+    pinContainerToModel(cy, this.model, this.id);
+    pinLeafToModel(cy, this.model, childId);
   }
 
   private beginChildDrag(cy: Core, childId: string): void {
@@ -689,9 +684,7 @@ export class GraphParentVertex {
     cy.userPanningEnabled(false);
     cyChild.style("opacity", 0);
     cyChild.style("events", "no");
-    if (this.model) {
-      pinContainerToModel(cy, this.model, this.id);
-    }
+    pinContainerToModel(cy, model, this.id);
   }
 
   private finishChildDrag(cy: Core): void {
@@ -723,9 +716,11 @@ export class GraphParentVertex {
     if (!this.model) {
       this.syncModelFromCy(cy);
     }
+    /* v8 ignore start -- syncModelFromCy always rebuilds a model from live elements */
     if (!this.model) {
       return;
     }
+    /* v8 ignore stop */
     const cyParent = cy.getElementById(this.id);
     if (cyParent.empty()) {
       return;
@@ -736,10 +731,8 @@ export class GraphParentVertex {
       cyParent.position(),
       this.viewportClampOptions(cy),
     );
-    if (this.model) {
-      pinContainerToModel(cy, this.model, this.id);
-      applySubtreePositionsToCy(cy, this.model, this.id);
-    }
+    pinContainerToModel(cy, this.model, this.id);
+    applySubtreePositionsToCy(cy, this.model, this.id);
   }
 
   private viewportClampOptions(cy?: Core): MoveCompositeOptions | undefined {

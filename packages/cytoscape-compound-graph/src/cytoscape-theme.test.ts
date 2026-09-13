@@ -106,8 +106,11 @@ describe("live-zoom leaf stylesheet", () => {
 
   it("stops tracking live zoom after metrics are frozen into model space", () => {
     const cy = leafCy();
+    // Register the live-zoom hook before freezing metrics into model space.
+    expect(cy.getElementById("child").numericStyle("width")).toBeCloseTo(LEAF_NODE_DIAMETER);
     applyReferenceZoomToLeafMetrics(cy, 0.5);
     const frozen = Number(cy.getElementById("child").data("nodeWidth"));
+    expect(cy.scratch("_ccgLeafMetricsModelSpace")).toBe(true);
     cy.zoom(0.25);
     cy.emit("zoom");
     expect(cy.getElementById("child").numericStyle("width")).toBeCloseTo(frozen);
@@ -115,8 +118,8 @@ describe("live-zoom leaf stylesheet", () => {
 
   it("refreshLeafStyle no-ops when the style API cannot update", () => {
     const cy = leafCy();
+    expect(cy.getElementById("child").numericStyle("width")).toBeCloseTo(LEAF_NODE_DIAMETER);
     vi.spyOn(cy, "style").mockImplementation((() => ({})) as typeof cy.style);
-    cy.zoom(0.4);
     cy.emit("zoom");
     expect(cy.getElementById("child").data("kind")).toBe("leaf");
   });

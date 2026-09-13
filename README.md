@@ -55,6 +55,7 @@ const scene = CompoundGraphScene.fromSpec({
     { id: "a1", label: "a1", color: "#94a3b8", kind: "leaf", parent: "a", x: 0, y: 0 },
     { id: "b", label: "B", color: "#64748b", kind: "container", x: 280, y: 0, compoundWidth: 200, compoundHeight: 160 },
     { id: "b1", label: "b1", color: "#a8b4c4", kind: "leaf", parent: "b", x: 0, y: 0 },
+    { id: "standalone", label: "standalone", color: "#f59e0b", kind: "leaf", x: 520, y: 0 },
   ],
   edges: [],
 });

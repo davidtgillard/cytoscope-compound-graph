@@ -56,7 +56,7 @@ export function layoutModelFromCy(
     }
     flat[input.id] = position;
     measuredInputs.push(
-      !input.isCompound && input.parent
+      !input.isCompound
         ? { ...input, footprint: input.footprint ?? measureLeafFootprint(node) }
         : input,
     );

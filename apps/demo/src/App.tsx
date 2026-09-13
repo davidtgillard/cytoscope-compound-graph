@@ -15,7 +15,7 @@ import {
   type ResizeChildConstraints,
   type ResizeCorner,
 } from "@dgillard/cytoscape-compound-graph";
-import { createDemoCy, DEMO_COMPOUND, DEMO_THEME } from "./demo-graph";
+import { createDemoCy, DEMO_PROBE_LABEL, DEMO_SCENE, DEMO_THEME } from "./demo-graph";
 
 const CORNERS: ResizeCorner[] = ["nw", "ne", "sw", "se"];
 const HANDLE_SIZE = 12;
@@ -96,16 +96,17 @@ export function App() {
   const childNodeProbeRef = useRef<HTMLDivElement>(null);
   const childSelectedNodeProbeRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  const compoundRef = useRef(DEMO_COMPOUND);
+  const sceneRef = useRef(DEMO_SCENE);
   const childVisualStyleSignatureRef = useRef("");
   const childVisualStyleRef = useRef<ChildVisualStyle>(DEFAULT_CHILD_VISUAL_STYLE);
   const referenceZoomRef = useRef(1);
   const resizeStartRef = useRef<{
+    containerId: string;
     corner: ResizeCorner;
     startClientX: number;
     startClientY: number;
     zoom: number;
-    startModel: ReturnType<typeof DEMO_COMPOUND.cloneModel>;
+    startModel: ReturnType<typeof DEMO_SCENE.cloneModel>;
     constraints: ResizeChildConstraints;
     moved: boolean;
   } | null>(null);
@@ -118,26 +119,29 @@ export function App() {
     height: number;
   } | null>(null);
   const [childDragVisual, setChildDragVisual] = useState<ChildDragVisual | null>(null);
-  const [parentDragVisual, setParentDragVisual] = useState<ParentDragVisual | null>(null);
+  const [parentDragVisuals, setParentDragVisuals] = useState<
+    Array<ParentDragVisual & { id: string }>
+  >([]);
 
-  const compound = compoundRef.current;
-  const probeChild = compound.children[0];
+  const scene = sceneRef.current;
 
   const refreshOverlays = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) {
       return;
     }
-    compound.refreshFootprintsFromCy(cy);
-    const nextChildDragVisual = compound.childDragVisual(cy);
-    const nextParentDragVisual = compound.parentDragVisual(cy);
+    scene.refreshFootprintsFromCy(cy);
+    const nextChildDragVisual = scene.childDragVisual(cy);
+    const nextParentDragVisuals = [...scene.parentDragVisuals(cy).entries()].map(
+      ([id, visual]) => ({ id, ...visual }),
+    );
     setChildDragVisual((previous) =>
       overlayVisualEqual(previous, nextChildDragVisual) ? previous : nextChildDragVisual,
     );
-    setParentDragVisual((previous) =>
-      overlayVisualEqual(previous, nextParentDragVisual) ? previous : nextParentDragVisual,
+    setParentDragVisuals((previous) =>
+      overlayVisualEqual(previous, nextParentDragVisuals) ? previous : nextParentDragVisuals,
     );
-  }, [compound]);
+  }, [scene]);
 
   const recomputeHandles = useCallback(() => {
     const cy = cyRef.current;
@@ -145,8 +149,9 @@ export function App() {
       setHandleRect(null);
       return;
     }
-    setHandleRect(compound.renderedHandleBox(cy));
-  }, [compound]);
+    const selectedId = cy.nodes("node[kind = 'container']:selected").first().id() || null;
+    setHandleRect(selectedId ? scene.renderedHandleBox(cy, selectedId) : null);
+  }, [scene]);
 
   const applyConfiguredChildVisualStyle = useCallback((cy: Core): void => {
     const childVisualStyle = readComputedChildVisualStyle(
@@ -204,13 +209,13 @@ export function App() {
       return;
     }
 
-    compound.setEdgeClearance(THEME.childEdgeClearancePx / zoom);
-    compound.setNodeOverlapPadding(THEME.nodeOverlapPadding);
-  }, [compound]);
+    scene.setEdgeClearance(THEME.childEdgeClearancePx / zoom);
+    scene.setNodeOverlapPadding(THEME.nodeOverlapPadding);
+  }, [scene]);
 
   useEffect(() => {
     refreshInteriorClearances();
-  }, [parentDragVisual, refreshInteriorClearances]);
+  }, [parentDragVisuals, refreshInteriorClearances]);
 
   useEffect(() => {
     const labelProbe = childLabelProbeRef.current;
@@ -227,8 +232,8 @@ export function App() {
       if (!syncConfiguredChildVisualStyle(cy)) {
         return;
       }
-      compound.refreshFootprintsFromCy(cy);
-      compound.ensureModelFromCy(cy);
+      scene.refreshFootprintsFromCy(cy);
+      scene.ensureModelFromCy(cy);
       refreshInteriorClearances();
       recomputeHandles();
       refreshOverlays();
@@ -253,7 +258,7 @@ export function App() {
       resizeObserver.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [compound, refreshInteriorClearances, refreshOverlays, recomputeHandles, syncConfiguredChildVisualStyle]);
+  }, [scene, refreshInteriorClearances, refreshOverlays, recomputeHandles, syncConfiguredChildVisualStyle]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -267,7 +272,7 @@ export function App() {
     cy.ready(() => {
       referenceZoomRef.current = cy.zoom() > 0 ? cy.zoom() : 1;
       applyConfiguredChildVisualStyle(cy);
-      compound.initializeFromCy(cy);
+      scene.initializeFromCy(cy);
       refreshOverlays();
       recomputeHandles();
     });
@@ -285,7 +290,7 @@ export function App() {
     };
     cy.on("select unselect", onSelectionChange);
 
-    compound.attachChildDragHandlers(cy, {
+    scene.attachChildDragHandlers(cy, {
       onStart: () => {
         refreshOverlays();
       },
@@ -298,7 +303,7 @@ export function App() {
       },
     });
 
-    compound.attachParentDragHandlers(cy, {
+    scene.attachParentDragHandlers(cy, {
       onChange: () => {
         recomputeHandles();
         refreshOverlays();
@@ -309,7 +314,7 @@ export function App() {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [applyConfiguredChildVisualStyle, graphKey, recomputeHandles, refreshOverlays, compound, syncConfiguredChildVisualStyle]);
+  }, [applyConfiguredChildVisualStyle, graphKey, recomputeHandles, refreshOverlays, scene, syncConfiguredChildVisualStyle]);
 
   const applyResize = useCallback(
     (clientX: number, clientY: number) => {
@@ -321,7 +326,8 @@ export function App() {
 
       const dxModel = (clientX - active.startClientX) / active.zoom;
       const dyModel = (clientY - active.startClientY) / active.zoom;
-      compound.resizeFromCorner(
+      scene.resizeFromCorner(
+        active.containerId,
         active.corner,
         dxModel,
         dyModel,
@@ -329,11 +335,11 @@ export function App() {
         active.constraints,
         cy,
       );
-      compound.syncToCy(cy);
+      scene.syncToCy(cy);
       recomputeHandles();
       refreshOverlays();
     },
-    [compound, recomputeHandles, refreshOverlays],
+    [scene, recomputeHandles, refreshOverlays],
   );
 
   const finishResize = useCallback(() => {
@@ -347,26 +353,31 @@ export function App() {
         return;
       }
 
-      compound.ensureModelFromCy(cy);
+      scene.ensureModelFromCy(cy);
       refreshInteriorClearances();
 
-      const constraints = compound.computeResizeChildConstraints(cy);
+      const containerId = cy.nodes("node[kind = 'container']:selected").first().id();
+      if (!containerId) {
+        return;
+      }
+      const constraints = scene.computeResizeChildConstraints(cy, containerId);
 
       event.preventDefault();
       event.stopPropagation();
       (event.target as HTMLElement).setPointerCapture(event.pointerId);
 
       resizeStartRef.current = {
+        containerId,
         corner,
         startClientX: event.clientX,
         startClientY: event.clientY,
         zoom: cy.zoom(),
-        startModel: compound.cloneModel(),
+        startModel: scene.cloneModel(),
         constraints,
         moved: false,
       };
     },
-    [compound, refreshInteriorClearances],
+    [scene, refreshInteriorClearances],
   );
 
   return (
@@ -390,41 +401,41 @@ export function App() {
             </div>
           ) : null}
           <div ref={childLabelProbeRef} className="child-drag-label style-probe">
-            {probeChild?.label ?? "child"}
+            {DEMO_PROBE_LABEL}
           </div>
           <div ref={childNodeProbeRef} className="child-drag-node style-probe" />
           <div ref={childSelectedNodeProbeRef} className="child-drag-node is-selected style-probe" />
-          {parentDragVisual ? (
-            <>
+          {parentDragVisuals.map((visual) => (
+            <div key={visual.id}>
               <div
-                className={`compound-parent-overlay${parentDragVisual.selected ? " is-selected" : ""}`}
+                className={`compound-parent-overlay${visual.selected ? " is-selected" : ""}`}
                 style={{
-                  left: parentDragVisual.left,
-                  top: parentDragVisual.top,
-                  width: parentDragVisual.width,
-                  height: parentDragVisual.height,
+                  left: visual.left,
+                  top: visual.top,
+                  width: visual.width,
+                  height: visual.height,
                 }}
               />
               <div
                 className="compound-parent-label-anchor"
                 style={{
-                  left: parentDragVisual.left + parentDragVisual.width / 2,
-                  top: parentDragVisual.top,
+                  left: visual.left + visual.width / 2,
+                  top: visual.top,
                 }}
               >
                 <div
                   className="compound-parent-label"
                   style={
                     {
-                      "--compound-parent-label-zoom-scale": parentDragVisual.zoomScale,
+                      "--compound-parent-label-zoom-scale": visual.zoomScale,
                     } as CSSProperties
                   }
                 >
-                  {parentDragVisual.label}
+                  {visual.label}
                 </div>
               </div>
-            </>
-          ) : null}
+            </div>
+          ))}
           <div
             className={`graph-viewport${childDragVisual ? " graph-viewport-dragging" : ""}`}
             ref={containerRef}

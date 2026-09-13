@@ -42,6 +42,7 @@
  *     { id: "a1", label: "a1", color: "#94a3b8", kind: "leaf", parent: "a" },
  *     { id: "b", label: "B", color: "#64748b", kind: "container", x: 300, y: 0 },
  *     { id: "b1", label: "b1", color: "#94a3b8", kind: "leaf", parent: "b" },
+ *     { id: "standalone", label: "standalone", color: "#f59e0b", kind: "leaf", x: 520, y: 0 },
  *   ],
  *   edges: [],
  * });

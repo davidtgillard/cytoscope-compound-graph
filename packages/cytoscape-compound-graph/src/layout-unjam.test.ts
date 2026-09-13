@@ -465,4 +465,63 @@ describe("layout-unjam", () => {
     const outer = unjammed.nodes.get("outer");
     expect(outer?.size?.w).toBeGreaterThanOrEqual(200);
   });
+
+  it("uses the default leaf footprint when measured footprints are cleared", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "a", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+        { id: "b", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      { a: { x: -80, y: 0 }, b: { x: 80, y: 0 } },
+    );
+    model.nodes.get("a")!.footprint = undefined;
+    model.nodes.get("b")!.footprint = undefined;
+    expect(isLocallyFree(model, "a")).toBe(true);
+    expect(isFullyImpeded(model, "a")).toBe(false);
+    const { changed } = unjamLayoutModel(model, { bootstrap: true });
+    expect(changed).toBe(false);
+  });
+
+  it("grows a parent that is below the compound minimum while children stay legal", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root", isCompound: true },
+        { id: "a", parent: "root", footprint: { halfW: 10, halfHTop: 10, halfHBottom: 10 } },
+      ],
+      {
+        root: { x: 0, y: 0, w: 70, h: 70 },
+        a: { x: 0, y: 0 },
+      },
+    );
+    expect(isValidRest(model, "a")).toBe(true);
+    const { model: unjammed, changed } = unjamLayoutModel(model, { bootstrap: true });
+    expect(changed).toBe(true);
+    expect(unjammed.nodes.get("root")!.size!.w).toBeGreaterThanOrEqual(COMPOUND_MIN_WIDTH);
+    expect(unjammed.nodes.get("root")!.size!.h).toBeGreaterThanOrEqual(COMPOUND_MIN_HEIGHT);
+  });
+
+  it("parks on the last room-needed candidate when grow cannot enlarge the parent", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "root", isCompound: true },
+        { id: "a", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+        { id: "b", parent: "root", footprint: { halfW: 18, halfHTop: 18, halfHBottom: 18 } },
+      ],
+      {
+        root: { x: 0, y: 0, w: 90, h: 90 },
+        a: { x: 0, y: 0 },
+        b: { x: 0, y: 0 },
+      },
+    );
+    vi.spyOn(layoutModel, "growCompositeToFitChildren").mockReturnValue(false);
+    const beforeA = { ...model.nodes.get("a")!.center };
+    const { model: unjammed, changed } = unjamLayoutModel(model, {
+      bootstrap: true,
+      ringStep: 40,
+      maxRings: 3,
+    });
+    expect(changed).toBe(true);
+    expect(unjammed.nodes.get("a")!.center).not.toEqual(beforeA);
+    vi.restoreAllMocks();
+  });
 });

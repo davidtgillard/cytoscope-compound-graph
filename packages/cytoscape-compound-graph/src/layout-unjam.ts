@@ -83,13 +83,13 @@ function setNodeCenter(
   node.center = { x: center.x, y: center.y };
 }
 
-function leafFootprint(node: LayoutNode | undefined): {
+function leafFootprint(node: LayoutNode): {
   halfW: number;
   halfHTop: number;
   halfHBottom: number;
 } {
   return (
-    node?.footprint ?? {
+    node.footprint ?? {
       halfW: 18,
       halfHTop: 26,
       halfHBottom: 26,
@@ -117,9 +117,12 @@ function obstacleBoxesFor(
       continue;
     }
     const box = visualBox(model, otherId);
-    if (box) {
-      boxes.push(box);
+    /* v8 ignore start -- visualBox is null only when the node is missing */
+    if (!box) {
+      continue;
     }
+    /* v8 ignore stop */
+    boxes.push(box);
   }
   return boxes;
 }
@@ -299,9 +302,11 @@ function growParentForUnjam(
 
 function compositeBelowMinimum(model: WorkPackageLayoutModel, compositeId: string): boolean {
   const size = model.nodes.get(compositeId)?.size;
+  /* v8 ignore start -- unsized parents fail child validity instead of this check */
   if (!size) {
     return false;
   }
+  /* v8 ignore stop */
   return size.w + EPSILON < COMPOUND_MIN_WIDTH || size.h + EPSILON < COMPOUND_MIN_HEIGHT;
 }
 

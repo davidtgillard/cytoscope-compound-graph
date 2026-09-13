@@ -32,6 +32,16 @@ describe("cytoscape-sync", () => {
     expect(model.nodes.get("child")?.center).toEqual({ x: 12, y: 8 });
   });
 
+  it("layoutModelFromCy measures footprints for parentless leaves", () => {
+    const cy = cytoscape({
+      headless: true,
+      style: createCompoundGraphStylesheet(),
+      elements: [{ data: { id: "root-leaf", kind: "leaf", label: "root-leaf" }, position: { x: 0, y: 0 } }],
+    });
+    const model = layoutModelFromCy(cy, [{ id: "root-leaf" }]);
+    expect(model.nodes.get("root-leaf")?.footprint).toBeDefined();
+  });
+
   it("applyLayoutModelToCy writes compound sizes before descendant positions", () => {
     const cy = cytoscape({
       headless: true,

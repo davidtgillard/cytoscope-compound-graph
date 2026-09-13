@@ -147,12 +147,23 @@ export function syncLeafFootprintsFromCy(
   parentId: string,
   skipIds?: ReadonlySet<string>,
 ): void {
-  for (const childId of model.childrenOf.get(parentId) ?? []) {
-    if (skipIds?.has(childId)) {
+  syncLeafIdsFootprintsFromCy(cy, model, model.childrenOf.get(parentId) ?? [], skipIds);
+}
+
+/** Measure named leaves (parented or parentless) from Cytoscape into the model. */
+/** @internal */
+export function syncLeafIdsFootprintsFromCy(
+  cy: Core,
+  model: WorkPackageLayoutModel,
+  leafIds: readonly string[],
+  skipIds?: ReadonlySet<string>,
+): void {
+  for (const leafId of leafIds) {
+    if (skipIds?.has(leafId)) {
       continue;
     }
-    const layoutNode = model.nodes.get(childId);
-    const cyNode = cy.getElementById(childId);
+    const layoutNode = model.nodes.get(leafId);
+    const cyNode = cy.getElementById(leafId);
     if (!layoutNode || layoutNode.isCompound || cyNode.empty()) {
       continue;
     }

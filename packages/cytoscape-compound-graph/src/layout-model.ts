@@ -180,10 +180,9 @@ export function buildLayoutModel(
     }
   }
 
-  for (const [parentId, childIds] of childrenOf) {
-    if (childIds.length > 0) {
-      compoundIds.add(parentId);
-    }
+  // Every childrenOf entry is created by pushing at least one child above.
+  for (const parentId of childrenOf.keys()) {
+    compoundIds.add(parentId);
   }
 
   const nodes = new Map<string, LayoutNode>();
@@ -393,9 +392,12 @@ function obstacleBoxesFor(model: WorkPackageLayoutModel, subjectId: string): Vis
       continue;
     }
     const box = visualBox(model, otherId);
-    if (box) {
-      boxes.push(box);
+    /* v8 ignore start -- visualBox is null only when the node is missing */
+    if (!box) {
+      continue;
     }
+    /* v8 ignore stop */
+    boxes.push(box);
   }
   return boxes;
 }

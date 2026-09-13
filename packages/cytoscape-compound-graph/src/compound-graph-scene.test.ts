@@ -178,6 +178,22 @@ describe("CompoundGraphScene", () => {
     expect(scene.isChildDragInProgress()).toBe(false);
   });
 
+  it("attachParentDragHandlers ignores parentless overflow leaves", () => {
+    const overflowId = `${OVERFLOW_NODE_PREFIX}lone`;
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [
+        { id: overflowId, label: "+1", color: "#94a3b8", kind: "leaf", x: 0, y: 0 },
+      ],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    const onGrab = vi.fn();
+    scene.attachParentDragHandlers(cy, { onGrab });
+    cy.getElementById(overflowId).trigger("grab");
+    expect(onGrab).not.toHaveBeenCalled();
+  });
+
   it("multi-compound resize keeps sibling compound absolutes unchanged", () => {
     const scene = twoCompoundScene();
     const cy = headlessCy(scene.buildElements());
@@ -246,9 +262,12 @@ describe("CompoundGraphScene", () => {
     expect(removeSpy).toHaveBeenCalledWith("grab", "node[kind = 'container']", expect.any(Function));
     expect(removeSpy).toHaveBeenCalledWith("drag", "node[kind = 'container']", expect.any(Function));
     expect(removeSpy).toHaveBeenCalledWith("free", "node[kind = 'container']", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("grab", "node[kind = 'leaf']", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("drag", "node[kind = 'leaf']", expect.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith("free", "node[kind = 'leaf']", expect.any(Function));
   });
 
-  it("root leaf stays grabbable and attachRootLeafDragHandlers updates the model", () => {
+  it("root leaf stays grabbable and attachParentDragHandlers updates the model", () => {
     const scene = CompoundGraphScene.fromSpec({
       nodes: [
         {
@@ -273,7 +292,7 @@ describe("CompoundGraphScene", () => {
     expect(cy.getElementById("child").grabbable()).toBe(false);
 
     const onChange = vi.fn();
-    scene.attachRootLeafDragHandlers(cy, { onChange });
+    scene.attachParentDragHandlers(cy, { onChange });
     const leaf = cy.getElementById("root-leaf");
     const start = absoluteCenter(scene.getModel()!, "root-leaf");
     leaf.trigger("grab");
@@ -310,20 +329,6 @@ describe("CompoundGraphScene", () => {
     fireTapstart(syntheticTapstart(cy, "root-leaf", new Event("pointerdown")));
     expect(onStart).not.toHaveBeenCalled();
     expect(scene.isChildDragInProgress()).toBe(false);
-  });
-
-  it("attachRootLeafDragHandlers cleanup removes listeners", () => {
-    const scene = twoCompoundScene();
-    const cy = headlessCy(scene.buildElements());
-    scene.initializeFromCy(cy);
-
-    const removeSpy = vi.spyOn(cy, "removeListener");
-    const cleanup = scene.attachRootLeafDragHandlers(cy, {});
-    cleanup();
-
-    expect(removeSpy).toHaveBeenCalledWith("grab", "node[kind = 'leaf']", expect.any(Function));
-    expect(removeSpy).toHaveBeenCalledWith("drag", "node[kind = 'leaf']", expect.any(Function));
-    expect(removeSpy).toHaveBeenCalledWith("free", "node[kind = 'leaf']", expect.any(Function));
   });
 
   it("parentDragVisuals returns selected containers only", () => {
@@ -470,6 +475,20 @@ describe("CompoundGraphScene", () => {
     scene.refreshFootprintsFromCy(cy);
     expect(scene.getModel()?.nodes.get("inner-leaf")?.footprint).toBeDefined();
     expect(scene.getModel()?.nodes.get("outer-leaf")?.footprint).toBeDefined();
+  });
+
+  it("initializeFromCy and refreshFootprintsFromCy measure parentless leaf footprints", () => {
+    const scene = CompoundGraphScene.fromSpec({
+      nodes: [{ id: "root-leaf", label: "root-leaf", color: "#94a3b8", kind: "leaf", x: 0, y: 0 }],
+      edges: [],
+    });
+    const cy = headlessCy(scene.buildElements());
+    scene.initializeFromCy(cy);
+    expect(scene.getModel()?.nodes.get("root-leaf")?.footprint).toBeDefined();
+
+    scene.getModel()!.nodes.get("root-leaf")!.footprint = undefined;
+    scene.refreshFootprintsFromCy(cy);
+    expect(scene.getModel()?.nodes.get("root-leaf")?.footprint).toBeDefined();
   });
 
   it("buildElements includes edges and passthrough node data", () => {

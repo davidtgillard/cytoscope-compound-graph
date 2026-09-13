@@ -28,12 +28,12 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.17.4",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.11",
     "cytoscape": "^3.33.1",
     "jsdom": "^29.1.1",
-    "tsup": "^8.5.0",
+    "tsup": "^8.5.1",
     "typedoc": "^0.28.5",
     "typescript": "~5.8.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   }
 }

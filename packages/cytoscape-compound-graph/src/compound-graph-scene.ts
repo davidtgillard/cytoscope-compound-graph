@@ -35,6 +35,7 @@ import type { ChildDragVisual, ParentDragVisual } from "./compound-graph";
 import {
   compoundAbsolutePosition,
   syncLeafFootprintsFromCy,
+  syncLeafIdsFootprintsFromCy,
 } from "./cytoscape-utils";
 import {
   clientPointFromDomEvent,
@@ -170,6 +171,7 @@ export class CompoundGraphScene {
     return this.model;
   }
 
+  /** Enables or disables viewport clamping for container and parentless-leaf drag. */
   setClampParentToViewport(enabled: boolean): void {
     this.clampParentToViewport = enabled;
   }
@@ -226,6 +228,25 @@ export class CompoundGraphScene {
           !isOverflowNodeId(node.id),
       )
       .map((node) => node.id);
+  }
+
+  private nativeDragKind(nodeId: string): "container" | "root-leaf" | null {
+    const spec = this.nodeSpecs.get(nodeId);
+    if (!spec) {
+      return null;
+    }
+    if (spec.kind === "container") {
+      return "container";
+    }
+    if (
+      spec.kind === "leaf" &&
+      !spec.parent &&
+      !spec.isOverflow &&
+      !isOverflowNodeId(spec.id)
+    ) {
+      return "root-leaf";
+    }
+    return null;
   }
 
   private applyGrabPolicy(cy: Core): void {
@@ -398,7 +419,7 @@ export class CompoundGraphScene {
    * a new container centre against stale child offsets, and every child jumps by half the
    * drag as soon as that layout is re-hydrated. Save this map instead.
    *
-   * Drags need no equivalent: `moveChild` and `moveComposite` change one entry.
+   * Drags need no equivalent: `moveChild`, `moveComposite`, and `moveRootLeaf` each change one entry.
    */
   flatLayoutForSubtree(
     containerId: string,
@@ -448,6 +469,7 @@ export class CompoundGraphScene {
     for (const containerId of this.containerIds()) {
       syncLeafFootprintsFromCy(cy, model, containerId, skipIds);
     }
+    syncLeafIdsFootprintsFromCy(cy, model, this.rootLeafIds(), skipIds);
   }
 
   renderedHandleBox(
@@ -683,105 +705,74 @@ export class CompoundGraphScene {
     };
   }
 
+  /**
+   * Native grab/drag/free for containers and parentless leaves. Parented leaves stay
+   * on {@link attachChildDragHandlers}; this handler looks up `nodeSpecs` live so a
+   * documented two-call setup keeps the layout model in sync.
+   */
   attachParentDragHandlers(
     cy: Core,
-    callbacks: { onGrab?: (containerId: string) => void; onChange?: () => void },
+    callbacks: { onGrab?: (nodeId: string) => void; onChange?: () => void },
   ): () => void {
     const movedDuringGesture = new Map<string, boolean>();
 
+    const syncNativeDrag = (nodeId: string): boolean => {
+      const kind = this.nativeDragKind(nodeId);
+      if (kind === "container") {
+        this.syncParentDragFromCy(cy, nodeId);
+        return true;
+      }
+      if (kind === "root-leaf") {
+        this.syncRootLeafDragFromCy(cy, nodeId);
+        return true;
+      }
+      return false;
+    };
+
     const onGrab = (event: EventObject) => {
-      const containerId = event.target.id();
-      if (
-        this.childDragActive ||
-        !this.nodeSpecs.get(containerId) ||
-        this.nodeSpecs.get(containerId)?.kind !== "container"
-      ) {
+      const nodeId = event.target.id();
+      if (this.childDragActive || !this.nativeDragKind(nodeId)) {
         return;
       }
-      movedDuringGesture.set(containerId, false);
-      callbacks.onGrab?.(containerId);
+      movedDuringGesture.set(nodeId, false);
+      callbacks.onGrab?.(nodeId);
     };
 
     const onDrag = (event: EventObject) => {
-      const containerId = event.target.id();
-      if (this.childDragActive || this.nodeSpecs.get(containerId)?.kind !== "container") {
+      const nodeId = event.target.id();
+      if (this.childDragActive) {
         return;
       }
-      movedDuringGesture.set(containerId, true);
-      this.syncParentDragFromCy(cy, containerId);
+      if (!syncNativeDrag(nodeId)) {
+        return;
+      }
+      movedDuringGesture.set(nodeId, true);
       callbacks.onChange?.();
     };
 
     const onFree = (event: EventObject) => {
-      const containerId = event.target.id();
-      if (this.childDragActive || this.nodeSpecs.get(containerId)?.kind !== "container") {
+      const nodeId = event.target.id();
+      if (this.childDragActive || !this.nativeDragKind(nodeId)) {
         return;
       }
-      if (movedDuringGesture.get(containerId)) {
-        this.syncParentDragFromCy(cy, containerId);
+      if (movedDuringGesture.get(nodeId)) {
+        syncNativeDrag(nodeId);
         callbacks.onChange?.();
       }
-      movedDuringGesture.delete(containerId);
+      movedDuringGesture.delete(nodeId);
     };
 
     cy.on("grab", "node[kind = 'container']", onGrab);
     cy.on("drag", "node[kind = 'container']", onDrag);
     cy.on("free", "node[kind = 'container']", onFree);
-
-    return () => {
-      cy.removeListener("grab", "node[kind = 'container']", onGrab);
-      cy.removeListener("drag", "node[kind = 'container']", onDrag);
-      cy.removeListener("free", "node[kind = 'container']", onFree);
-    };
-  }
-
-  /**
-   * Native grab/drag/free for parentless leaves. Call alongside
-   * {@link attachParentDragHandlers}; child-drag intentionally ignores these nodes.
-   */
-  attachRootLeafDragHandlers(
-    cy: Core,
-    callbacks: { onGrab?: (leafId: string) => void; onChange?: () => void },
-  ): () => void {
-    const rootLeafIds = new Set(this.rootLeafIds());
-    const movedDuringGesture = new Map<string, boolean>();
-
-    const onGrab = (event: EventObject) => {
-      const leafId = event.target.id();
-      if (this.childDragActive || !rootLeafIds.has(leafId)) {
-        return;
-      }
-      movedDuringGesture.set(leafId, false);
-      callbacks.onGrab?.(leafId);
-    };
-
-    const onDrag = (event: EventObject) => {
-      const leafId = event.target.id();
-      if (this.childDragActive || !rootLeafIds.has(leafId)) {
-        return;
-      }
-      movedDuringGesture.set(leafId, true);
-      this.syncRootLeafDragFromCy(cy, leafId);
-      callbacks.onChange?.();
-    };
-
-    const onFree = (event: EventObject) => {
-      const leafId = event.target.id();
-      if (this.childDragActive || !rootLeafIds.has(leafId)) {
-        return;
-      }
-      if (movedDuringGesture.get(leafId)) {
-        this.syncRootLeafDragFromCy(cy, leafId);
-        callbacks.onChange?.();
-      }
-      movedDuringGesture.delete(leafId);
-    };
-
     cy.on("grab", "node[kind = 'leaf']", onGrab);
     cy.on("drag", "node[kind = 'leaf']", onDrag);
     cy.on("free", "node[kind = 'leaf']", onFree);
 
     return () => {
+      cy.removeListener("grab", "node[kind = 'container']", onGrab);
+      cy.removeListener("drag", "node[kind = 'container']", onDrag);
+      cy.removeListener("free", "node[kind = 'container']", onFree);
       cy.removeListener("grab", "node[kind = 'leaf']", onGrab);
       cy.removeListener("drag", "node[kind = 'leaf']", onDrag);
       cy.removeListener("free", "node[kind = 'leaf']", onFree);
@@ -814,10 +805,8 @@ export class CompoundGraphScene {
       y: session.startChildAbsolute.y + delta.y - session.parentAbsolute.y,
     });
     this.model = nextModel;
-    if (this.model) {
-      pinContainerToModel(cy, this.model, session.parentId);
-      pinLeafToModel(cy, this.model, childId);
-    }
+    pinContainerToModel(cy, this.model, session.parentId);
+    pinLeafToModel(cy, this.model, childId);
   }
 
   private beginChildDrag(cy: Core, childId: string): void {
@@ -896,9 +885,11 @@ export class CompoundGraphScene {
     if (!this.model) {
       this.syncModelFromCy(cy);
     }
+    /* v8 ignore start -- syncModelFromCy always rebuilds a model from live elements */
     if (!this.model) {
       return;
     }
+    /* v8 ignore stop */
     const cyLeaf = cy.getElementById(leafId);
     if (cyLeaf.empty()) {
       return;
@@ -910,18 +901,18 @@ export class CompoundGraphScene {
       { x: cyLeaf.position().x, y: cyLeaf.position().y },
       this.viewportClampOptions(cy),
     );
-    if (this.model) {
-      pinLeafToModel(cy, this.model, leafId);
-    }
+    pinLeafToModel(cy, this.model, leafId);
   }
 
   private syncParentDragFromCy(cy: Core, containerId: string): void {
     if (!this.model) {
       this.syncModelFromCy(cy);
     }
+    /* v8 ignore start -- syncModelFromCy always rebuilds a model from live elements */
     if (!this.model) {
       return;
     }
+    /* v8 ignore stop */
     const cyParent = cy.getElementById(containerId);
     if (cyParent.empty()) {
       return;
@@ -941,10 +932,8 @@ export class CompoundGraphScene {
       proposedRelative,
       this.viewportClampOptions(cy),
     );
-    if (this.model) {
-      pinContainerToModel(cy, this.model, containerId);
-      applySubtreePositionsToCy(cy, this.model, containerId);
-    }
+    pinContainerToModel(cy, this.model, containerId);
+    applySubtreePositionsToCy(cy, this.model, containerId);
   }
 
   private viewportClampOptions(cy?: Core): MoveCompositeOptions | undefined {

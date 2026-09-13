@@ -964,4 +964,32 @@ describe("layout-model move and resize branches", () => {
     model.parentOf.delete("child");
     expect(() => resizeComposite(model, "parent", "se", 20, 20)).not.toThrow();
   });
+
+  it("moveRootLeaf rejects a jammed start that cannot resolve to a legal rest", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "a", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+        { id: "b", footprint: { halfW: 20, halfHTop: 20, halfHBottom: 20 } },
+      ],
+      { a: { x: 0, y: 0 }, b: { x: 0, y: 0 } },
+    );
+    expect(isLegalNodeRest(model, "a")).toBe(false);
+    expect(moveRootLeaf(model, "a", { x: 5, y: 0 })).toBe(model);
+  });
+
+  it("isLegalNodeRest evaluates sized compounds and skips missing obstacle nodes", () => {
+    const model = buildLayoutModel(
+      [
+        { id: "left", isCompound: true },
+        { id: "right", isCompound: true },
+      ],
+      {
+        left: { x: 0, y: 0, w: 100, h: 80 },
+        right: { x: 200, y: 0, w: 100, h: 80 },
+      },
+    );
+    expect(isLegalNodeRest(model, "left")).toBe(true);
+    model.nodes.get("right")!.center = { x: 0, y: 0 };
+    expect(isLegalNodeRest(model, "left")).toBe(false);
+  });
 });
